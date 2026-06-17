@@ -1,0 +1,14 @@
+# Compiled binaries
+01-prometheus-direct/01-prometheus-direct
+02-otel-sdk/02-otel-sdk
+03-hashicorp/03-hashicorp
+04-victoriametrics/04-victoriametrics
+*/server
+
+# Go workspace sum (local only)
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
