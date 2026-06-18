@@ -30,10 +30,22 @@ func main() {
 		log.Fatalf("create otlp exporter: %v", err)
 	}
 
+	// Override default OTel histogram boundaries (0,5,10,25... seconds) with
+	// Prometheus-compatible millisecond-range buckets for HTTP handler latency.
+	latencyView := sdkmetric.NewView(
+		sdkmetric.Instrument{Name: "workflow.submission.duration"},
+		sdkmetric.Stream{
+			Aggregation: sdkmetric.AggregationExplicitBucketHistogram{
+				Boundaries: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1},
+			},
+		},
+	)
+
 	provider := sdkmetric.NewMeterProvider(
 		sdkmetric.WithReader(
 			sdkmetric.NewPeriodicReader(exporter, sdkmetric.WithInterval(15*time.Second)),
 		),
+		sdkmetric.WithView(latencyView),
 	)
 	defer func() {
 		if err := provider.Shutdown(ctx); err != nil {

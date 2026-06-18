@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kitchen-sink-scrape-configs
+  namespace: monitoring
+stringData:
+  scrape-configs.yaml: |
+    - job_name: "kitchen-sink/01-prometheus-direct"
+      static_configs:
+        - targets: ["host.docker.internal:8081"]
+          labels:
+            app: "01-prometheus-direct"
+
+    - job_name: "kitchen-sink/02-otel-sdk-via-collector"
+      static_configs:
+        - targets: ["host.docker.internal:8889"]
+          labels:
+            app: "02-otel-sdk"
+
+    - job_name: "kitchen-sink/03-hashicorp"
+      static_configs:
+        - targets: ["host.docker.internal:8083"]
+          labels:
+            app: "03-hashicorp"
+
+    - job_name: "kitchen-sink/04-victoriametrics"
+      static_configs:
+        - targets: ["host.docker.internal:8084"]
+          labels:
+            app: "04-victoriametrics"
