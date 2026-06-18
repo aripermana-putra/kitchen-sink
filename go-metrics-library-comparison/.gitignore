@@ -1,8 +1,9 @@
-# Compiled binaries
+# Compiled binaries — match any binary named after its directory
 01-prometheus-direct/01-prometheus-direct
 02-otel-sdk/02-otel-sdk
 03-hashicorp/03-hashicorp
 04-victoriametrics/04-victoriametrics
+05-otel-sdk-pull/05-otel-sdk-pull
 */server
 
 # Go workspace sum (local only)
