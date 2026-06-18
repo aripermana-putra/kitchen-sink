@@ -1,4 +1,4 @@
-APPS := 01-prometheus-direct 02-otel-sdk 03-hashicorp 04-victoriametrics
+APPS := 01-prometheus-direct 02-otel-sdk 03-hashicorp 04-victoriametrics 05-otel-sdk-pull
 
 # ── Local development with docker-compose ─────────────────────────────────
 
@@ -33,6 +33,7 @@ load: ## Send 500 POST requests to each app (2000 total, in parallel)
 		for i in $$(seq 1 500); do curl -s -o /dev/null -X POST http://localhost:8082/workflow/submit; done & \
 		for i in $$(seq 1 500); do curl -s -o /dev/null -X POST http://localhost:8083/workflow/submit; done & \
 		for i in $$(seq 1 500); do curl -s -o /dev/null -X POST http://localhost:8084/workflow/submit; done & \
+		for i in $$(seq 1 500); do curl -s -o /dev/null -X POST http://localhost:8085/workflow/submit; done & \
 		wait; \
 	}
 	@echo "Done."
@@ -70,6 +71,14 @@ metrics-03: ## Show raw metrics from 03-hashicorp
 .PHONY: metrics-04
 metrics-04: ## Show raw metrics from 04-victoriametrics
 	@curl -s http://localhost:8084/metrics | grep -A2 "workflow_submission_duration"
+
+.PHONY: metrics-05
+metrics-05: ## Show raw metrics from 05-otel-sdk-pull
+	@curl -s http://localhost:8085/metrics | grep -A2 "workflow_submission_duration"
+
+.PHONY: load-05
+load-05: ## Send 500 requests to 05-otel-sdk-pull only
+	@for i in $$(seq 1 500); do curl -s -o /dev/null -X POST http://localhost:8085/workflow/submit; done
 
 # ── Prometheus scrape config (applied to existing K8s Prometheus) ─────────
 

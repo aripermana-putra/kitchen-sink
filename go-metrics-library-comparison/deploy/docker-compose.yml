@@ -26,6 +26,11 @@ services:
     ports:
       - "8084:8084"
 
+  app-05:
+    build: ../05-otel-sdk-pull
+    ports:
+      - "8085:8085"
+
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.102.0
     command: ["--config=/etc/otel/config.yaml"]
