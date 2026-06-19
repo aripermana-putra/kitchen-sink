@@ -64,6 +64,14 @@ test-errors: ## Run error handler scenario tests (requires servers running)
 test-load: ## Run load test across all 6 variants (requires servers running)
 	k6 run k6/load-test.js
 
+.PHONY: test-load-multi
+test-load-multi: ## Run all 6 variants simultaneously (no ordering bias)
+	k6 run k6/load-test-multi.js
+
+.PHONY: bench
+bench: ## Run multi-variant load test N times with server restarts (default: 5 runs)
+	./scripts/bench.sh $(RUNS)
+
 .PHONY: test-all
 test-all: run ## Start servers then run both test suites
 	@sleep 1
