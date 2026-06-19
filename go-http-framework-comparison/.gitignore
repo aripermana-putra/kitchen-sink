@@ -1,0 +1,19 @@
+# Compiled binaries
+*/server
+01-echo-standard/01-echo-standard
+02-echo-strict/02-echo-strict
+03-chi-standard/03-chi-standard
+04-chi-strict/04-chi-strict
+05-gin-standard/05-gin-standard
+06-gin-strict/06-gin-strict
+
+# Generated code — regenerate with: make generate
+*/gen/
+
+# Go workspace sum
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp

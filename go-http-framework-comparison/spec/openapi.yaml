@@ -1,0 +1,188 @@
+openapi: "3.0.3"
+info:
+  title: UCP Compute API (framework comparison)
+  version: "1.0.0"
+
+paths:
+  /compute:
+    post:
+      operationId: CreateCompute
+      summary: Submit a compute instance provisioning request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateComputeRequest'
+      responses:
+        "202":
+          description: Provisioning accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AsyncResponse'
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Instance already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    get:
+      operationId: ListCompute
+      summary: List compute instances for a tenant
+      parameters:
+        - name: tenantId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: List of compute instances
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComputeList'
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /compute/{name}:
+    get:
+      operationId: GetCompute
+      summary: Get a compute instance by name
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Compute instance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComputeInstance'
+        "404":
+          description: Instance not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      operationId: DeleteCompute
+      summary: Delete a compute instance
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deletion accepted
+        "404":
+          description: Instance not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Instance is already being deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    CreateComputeRequest:
+      type: object
+      required:
+        - name
+        - tenantId
+        - provider
+      properties:
+        name:
+          type: string
+          minLength: 3
+          maxLength: 63
+        tenantId:
+          type: string
+        provider:
+          type: string
+          enum: [gcp, aws]
+        size:
+          type: string
+          enum: [small, medium, large]
+          default: medium
+
+    ComputeInstance:
+      type: object
+      properties:
+        name:
+          type: string
+        tenantId:
+          type: string
+        provider:
+          type: string
+        size:
+          type: string
+        status:
+          type: string
+          enum: [provisioning, running, deleting, deleted]
+        workflowId:
+          type: string
+
+    ComputeList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComputeInstance'
+        total:
+          type: integer
+
+    AsyncResponse:
+      type: object
+      properties:
+        workflowId:
+          type: string
+        status:
+          type: string
+        message:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        requestId:
+          type: string
