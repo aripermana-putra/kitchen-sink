@@ -26,14 +26,14 @@ tidy: ## Run go mod tidy in all modules
 # ── Load test ─────────────────────────────────────────────────────────────
 
 .PHONY: load
-load: ## Send 500 POST requests to each app (2000 total, in parallel)
-	@echo "Sending 500 requests to each app in parallel..."
+load: ## Send 1000 POST requests to each app (2000 total, in parallel)
+	@echo "Sending 1000 requests to each app in parallel..."
 	@{ \
-		for i in $$(seq 1 500); do curl -s -o /dev/null -X POST http://localhost:8081/workflow/submit; done & \
-		for i in $$(seq 1 500); do curl -s -o /dev/null -X POST http://localhost:8082/workflow/submit; done & \
-		for i in $$(seq 1 500); do curl -s -o /dev/null -X POST http://localhost:8083/workflow/submit; done & \
-		for i in $$(seq 1 500); do curl -s -o /dev/null -X POST http://localhost:8084/workflow/submit; done & \
-		for i in $$(seq 1 500); do curl -s -o /dev/null -X POST http://localhost:8085/workflow/submit; done & \
+		for i in $$(seq 1 1000); do curl -s -o /dev/null -X POST http://localhost:8081/workflow/submit; done & \
+		for i in $$(seq 1 1000); do curl -s -o /dev/null -X POST http://localhost:8082/workflow/submit; done & \
+		for i in $$(seq 1 1000); do curl -s -o /dev/null -X POST http://localhost:8083/workflow/submit; done & \
+		for i in $$(seq 1 1000); do curl -s -o /dev/null -X POST http://localhost:8084/workflow/submit; done & \
+		for i in $$(seq 1 1000); do curl -s -o /dev/null -X POST http://localhost:8085/workflow/submit; done & \
 		wait; \
 	}
 	@echo "Done."
