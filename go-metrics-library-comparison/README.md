@@ -3,19 +3,24 @@
 Five identical apps — same endpoint, same business logic, different metrics libraries.
 Test setup: 500 requests per app, 50–200ms random latency, 10% error rate.
 
-| # | Library | `/metrics` | Timing type | Observed p99 | Observed avg | p99 PromQL | Multi-pod p99 | Extra infra | Data loss risk |
-|---|---------|-----------|-------------|-------------|-------------|-----------|--------------|-------------|----------------|
-| 01 | `prometheus/client_golang` | on app `:8081` | Histogram (`le=`) | ~0.247s ✅ | ~0.125s | ✅ Works | ✅ `sum by (le)` | None | None (pull) |
-| 02 | OTel SDK push | OTel Collector `:8889` | Histogram (`le=`) | ~0.247s ✅ | ~0.125s | ✅ Works | ✅ `sum by (le)` | OTel Collector | Up to 15s |
-| 03 | `hashicorp/go-metrics` | on app `:8083` | Summary (quantile=) | N/A ❌ | ~0.124s | ❌ No buckets | ❌ Impossible | None | None (pull) |
-| 04 | `VictoriaMetrics/metrics` | on app `:8084` | Histogram (`vmrange=`) | N/A ❌ | ~0.125s | ❌ `le` missing | ❌ Impossible | None | None (pull) |
-| 05 | OTel SDK pull | on app `:8085` | Histogram (`le=`) | ~0.247s ✅ | ~0.125s | ✅ Works | ✅ `sum by (le)` | None | None (pull) |
+Test setup: 1000 requests per app, 50–200ms random latency, 10% error rate, single replica (sequential load).
+
+| # | Library | `/metrics` | Timing type | Observed p99 | Observed traffic | Observed error rate | Observed saturation | p99 PromQL | Multi-pod p99 | Extra infra | Data loss risk |
+|---|---------|-----------|-------------|-------------|-----------------|--------------------|--------------------|-----------|--------------|-------------|----------------|
+| 01 | `prometheus/client_golang` | on app `:8081` | Histogram (`le=`) | ~0.248s ✅ | ~7 req/s | ~8–12% | max 1 | ✅ Works | ✅ `sum by (le)` | None | None (pull) |
+| 02 | OTel SDK push | OTel Collector `:8889` | Histogram (`le=`) | ~0.248s ✅ | ~7 req/s | ~8–12% | max 1 (fluctuates) | ✅ Works | ✅ `sum by (le)` | OTel Collector | Up to 15s |
+| 03 | `hashicorp/go-metrics` | on app `:8083` | Summary (`quantile=`) | N/A ❌ | ~7 req/s | ~8–12% | max 1 | ❌ No buckets | ❌ Impossible | None | None (pull) |
+| 04 | `VictoriaMetrics/metrics` | on app `:8084` | Histogram (`vmrange=`) | N/A ❌ | ~7 req/s | ~8–12% | max 1 | ❌ `le` missing | ❌ Impossible | None | None (pull) |
+| 05 | OTel SDK pull | on app `:8085` | Histogram (`le=`) | ~0.248s ✅ | ~7 req/s | ~8–12% | max 1 | ✅ Works | ✅ `sum by (le)` | None | None (pull) |
 
 **Notes:**
-- 02 p99 requires custom histogram boundaries — OTel default boundaries (`0, 5, 10...` seconds) put all HTTP handler latency into `le="5"`, returning a flat 5.0s with no resolution
-- 03 Summary quantiles return `NaN` on sparse traffic; under load they populate but remain per-pod only
+- Traffic and error rate are consistent across all 5 — confirms the business logic is identical and load is evenly distributed
+- Error rate fluctuates 6–13% across scrape windows — normal statistical variation around the 10% coded rate
+- Saturation max 1 across all apps — sequential load means requests rarely overlap; 02 shows more fluctuation because the OTel push interval (15s) means the gauge is read at fixed intervals rather than per-scrape
+- 02 p99 requires custom histogram boundaries — OTel default boundaries (`0, 5, 10...` seconds) put all HTTP handler latency into `le="5"`, returning a flat 5.0s with no resolution. After fix: matches 01 and 05 exactly
+- 03 Summary quantiles return `NaN` on sparse traffic; under load they populate but remain per-pod only — non-aggregatable regardless
 - 04 `vmrange=` labels are incompatible with Prometheus `histogram_quantile` — works only if VictoriaMetrics is the TSDB
-- 05 = same OTel SDK as 02 but with Prometheus exporter bridge instead of OTLP push — no Collector needed
+- 05 = same OTel SDK as 02 but with Prometheus exporter bridge instead of OTLP push — no Collector needed, p99 identical to 01
 
 Each app exposes:
 - `POST /workflow/submit` — random 50–200ms latency, 10% error rate
