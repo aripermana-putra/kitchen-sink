@@ -63,6 +63,27 @@ kubectl port-forward -n monitoring svc/monitoring-grafana 3001:80
 make load   # 500 requests to each app in parallel
 ```
 
+## Signal coverage
+
+| Signal | `prometheus/client_golang` | OTel SDK (02 & 05) | `hashicorp/go-metrics` | `VictoriaMetrics/metrics` |
+|---|---|---|---|---|
+| Goroutine count | ✅ manual¹ | ✅ manual² | ✅ auto | ✅ auto |
+| Heap memory | ✅ manual¹ | ✅ manual² | ✅ auto | ✅ auto |
+| GC pause duration | ✅ manual¹ | ✅ manual² | ⚠️ auto (Summary) | ✅ auto (Histogram) |
+| GC run count/CPU | ✅ manual¹ | ✅ manual² | ✅ auto | ✅ auto |
+| CPU usage | ✅ manual¹ | ✅ manual² | ❌ not supported | ✅ auto |
+| Memory (RSS/virtual) | ✅ manual¹ | ✅ manual² | ❌ not supported | ✅ auto |
+| Thread count | ✅ manual¹ | ✅ manual² | ❌ not supported | ✅ auto |
+| Scheduler latency | ✅ manual¹ | ✅ manual² | ❌ not supported | ✅ auto (Histogram) |
+| Business metrics | ✅ manual | ✅ manual | ✅ manual | ✅ manual |
+| Traces | ❌ not supported | ✅ manual³ | ❌ not supported | ❌ not supported |
+
+¹ `prometheus.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))`
+
+² `go.opentelemetry.io/contrib/instrumentation/runtime` + `runtime.Start(ctx)`
+
+³ `go.opentelemetry.io/otel/trace` — same SDK, separate signal, routed to a trace backend via the same OTel Collector pipeline
+
 ## Key observation — Histogram vs Summary
 
 After sending load, compare the raw `/metrics` output:
