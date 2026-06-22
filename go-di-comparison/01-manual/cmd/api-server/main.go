@@ -1,28 +1,31 @@
 // 01-manual: Manual constructor injection — no DI framework.
 //
 // ── SCENARIO A — Initial wiring (2 feature slices: compute + database) ────
-// Wiring lines in buildApp(): 8 lines  [marked with WIRE]
-// Files involved in wiring: 1 (this file only)
-// Error detection: compile time
+// Wiring lines in buildApp(): 8 lines  [marked with WIRE-A]
 //
 // ── SCENARIO B — Add 1 new feature slice (storage) ────────────────────────
-// New files: internal/storage/service.go, internal/storage/handler.go
-// Changes in this file:
-//   + storageSvc := storage.NewService(k8s, temporal)   [+1 line]
-//   + storageH   := storage.NewHandler(storageSvc)      [+1 line]
-//   + storageH field in handlers struct                  [+1 line]
-//   + storageH arg in newHandlers()                      [+1 line]
-//   + delegation methods for storage endpoints           [+N lines matching spec]
-// Total main.go delta: ~4 lines + delegation methods
+// Add internal/storage/service.go + handler.go
+// Add 2 lines to buildApp() + delegation methods in handlers struct
+//
+// ── SCENARIO D — Multiple same-type dependencies (dbRead + dbWrite) ────────
+// Both are shared.DB — same interface, different instances.
+// Manual: just two positional args — clear, compiler-enforced.
+// uber/fx: requires fx.Annotate + name tags to disambiguate same-type deps.
+// See: 02-uber-fx/cmd/api-server/main.go for the fx contrast.
+//
+// ── SCENARIO E — Runtime strategy selection (quota per provider) ───────────
+// QuotaChecker has 3 implementations (GCP, AWS, ROC).
+// Strategy is selected per request based on req.Provider.
+// All implementations are wired at startup into a map.
+// This pattern is identical across all 3 DI approaches —
+// the dispatch logic is in the service, not the DI framework.
 //
 // ── ERROR DETECTION ────────────────────────────────────────────────────────
-// Remove `temporal` from compute.NewService(k8s) → immediate build failure:
-//   "not enough arguments in call to compute.NewService"
-// No app.Run() needed — compiler catches it before a single line executes.
+// Remove `dbWrite` from report.NewService(dbWrite, dbRead) → immediate build:
+//   "not enough arguments in call to report.NewService"
 //
 // ── AI ASSISTANCE ──────────────────────────────────────────────────────────
 // Pattern is plain Go function calls. No framework knowledge required.
-// AI sees the graph in one file and replicates the pattern mechanically.
 // The full dependency graph is readable top-to-bottom in buildApp().
 package main
 
@@ -40,39 +43,64 @@ import (
 	"github.com/kitchen-sink/01-manual/internal/compute"
 	"github.com/kitchen-sink/01-manual/internal/database"
 	"github.com/kitchen-sink/01-manual/internal/platform"
+	"github.com/kitchen-sink/01-manual/internal/quota"
+	"github.com/kitchen-sink/01-manual/internal/report"
 	"github.com/kitchen-sink/di-shared"
 )
 
 // ── Wiring ────────────────────────────────────────────────────────────────
-// All dependency construction in one function.
-// Reading top-to-bottom shows the full graph: what depends on what.
 
-func buildApp() *handlers {
-	cfg := shared.LoadConfig()                         // [WIRE 1] read config
+func buildApp() (*handlers, error) {
+	cfg := shared.LoadConfig()                          // [WIRE-A 1]
 
-	k8s := platform.NewK8sClient(cfg)                 // [WIRE 2] platform: k8s
-	temporal := platform.NewTemporalClient(cfg)        // [WIRE 3] platform: temporal
+	k8s := platform.NewK8sClient(cfg)                  // [WIRE-A 2]
+	temporal := platform.NewTemporalClient(cfg)         // [WIRE-A 3]
 
-	computeSvc := compute.NewService(k8s, temporal)    // [WIRE 4] compute service
-	computeH := compute.NewHandler(computeSvc)         // [WIRE 5] compute handler
+	computeSvc := compute.NewService(k8s, temporal)     // [WIRE-A 4]
+	computeH := compute.NewHandler(computeSvc)          // [WIRE-A 5]
 
-	databaseSvc := database.NewService(k8s, temporal)  // [WIRE 6] database service
-	databaseH := database.NewHandler(databaseSvc)      // [WIRE 7] database handler
+	databaseSvc := database.NewService(k8s, temporal)   // [WIRE-A 6]
+	databaseH := database.NewHandler(databaseSvc)       // [WIRE-A 7]
 
-	return newHandlers(computeH, databaseH)            // [WIRE 8] assemble
+	// ── SCENARIO D: two instances of the same shared.DB interface ─────────
+	// Plain positional args — no annotation, no name tag, no ambiguity.
+	// Contrast with 02-uber-fx where fx.Annotate + name tags are required.
+	dbWrite, err := platform.NewWriteDB(cfg)            // [WIRE-D 1]
+	if err != nil {
+		return nil, err
+	}
+	dbRead, err := platform.NewReadDB(cfg)              // [WIRE-D 2]
+	if err != nil {
+		return nil, err
+	}
+	reportSvc := report.NewService(dbWrite, dbRead)     // [WIRE-D 3] — two same-type args, clear intent
+	reportH := report.NewHandler(reportSvc)             // [WIRE-D 4]
+
+	// ── SCENARIO E: runtime strategy selection via map ────────────────────
+	// All provider implementations constructed at startup.
+	// Service selects the right one per request based on req.Provider.
+	// Adding a new provider = one line here, service is untouched.
+	quotaSvc := quota.NewService(quota.QuotaCheckers{   // [WIRE-E 1]
+		"gcp": platform.NewGCPQuotaChecker(cfg),
+		"aws": platform.NewAWSQuotaChecker(cfg),
+		"roc": platform.NewROCQuotaChecker(cfg),
+	})
+	quotaH := quota.NewHandler(quotaSvc)                // [WIRE-E 2]
+
+	return newHandlers(computeH, databaseH, reportH, quotaH), nil
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────
-// Aggregates all feature handlers and implements StrictServerInterface.
-// Each method delegates to the appropriate feature handler.
 
 type handlers struct {
 	compute  *compute.Handler
 	database *database.Handler
+	report   *report.Handler
+	quota    *quota.Handler
 }
 
-func newHandlers(c *compute.Handler, d *database.Handler) *handlers {
-	return &handlers{compute: c, database: d}
+func newHandlers(c *compute.Handler, d *database.Handler, r *report.Handler, q *quota.Handler) *handlers {
+	return &handlers{compute: c, database: d, report: r, quota: q}
 }
 
 var _ api.StrictServerInterface = (*handlers)(nil)
@@ -80,23 +108,30 @@ var _ api.StrictServerInterface = (*handlers)(nil)
 func (h *handlers) CreateCompute(ctx context.Context, req api.CreateComputeRequestObject) (api.CreateComputeResponseObject, error) {
 	return h.compute.CreateCompute(ctx, req)
 }
-
 func (h *handlers) GetCompute(ctx context.Context, req api.GetComputeRequestObject) (api.GetComputeResponseObject, error) {
 	return h.compute.GetCompute(ctx, req)
 }
-
 func (h *handlers) CreateDatabase(ctx context.Context, req api.CreateDatabaseRequestObject) (api.CreateDatabaseResponseObject, error) {
 	return h.database.CreateDatabase(ctx, req)
 }
-
 func (h *handlers) GetDatabase(ctx context.Context, req api.GetDatabaseRequestObject) (api.GetDatabaseResponseObject, error) {
 	return h.database.GetDatabase(ctx, req)
+}
+func (h *handlers) GetReport(ctx context.Context, req api.GetReportRequestObject) (api.GetReportResponseObject, error) {
+	return h.report.GetReport(ctx, req)
+}
+func (h *handlers) CheckQuota(ctx context.Context, req api.CheckQuotaRequestObject) (api.CheckQuotaResponseObject, error) {
+	return h.quota.CheckQuota(ctx, req)
 }
 
 // ── Server setup ──────────────────────────────────────────────────────────
 
 func main() {
-	app := buildApp()
+	app, err := buildApp()
+	if err != nil {
+		slog.Error("failed to build app", "error", err)
+		return
+	}
 
 	e := echo.New()
 	e.HideBanner = true

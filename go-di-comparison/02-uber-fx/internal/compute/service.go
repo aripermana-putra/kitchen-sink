@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/kitchen-sink/di-shared"
+	shared "github.com/kitchen-sink/di-shared"
 )
 
 type Service struct {

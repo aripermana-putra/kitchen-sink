@@ -1,46 +1,20 @@
 // 03-wire: Dependency injection via google/wire — code generation.
 //
-// ── SCENARIO A — Initial wiring (2 feature slices: compute + database) ────
-// Wiring lines in wire.go wire.Build(): 8 entries  [marked with WIRE]
-// Files involved in wiring: wire.go (spec) + wire_gen.go (generated, never edit)
-// Error detection: wire generate time (before compile)
+// ── SCENARIO D: Multiple same-type dependencies (dbRead + dbWrite) ─────────
+// wire uses WRAPPER TYPES to distinguish same-type deps — more type-safe than
+// fx's string name tags but requires extra boilerplate (WriteDB, ReadDB types
+// in platform/db_wire.go + adapter function here).
 //
-// ── SCENARIO B — Add 1 new feature slice (storage) ────────────────────────
-// New files: internal/storage/service.go, internal/storage/handler.go
-// Changes in wire.go:
-//   + storage.NewService entry   [+1 line]
-//   + storage.NewHandler entry   [+1 line]
-// Then: wire ./cmd/api-server/ → regenerates wire_gen.go
-// Changes in this file:
-//   + *storage.Handler field in handlers struct   [+1 line]
-//   + storageH arg in newHandlers()               [+1 line]
-//   + delegation methods for storage endpoints    [+N lines]
-// Total delta: ~3 lines in wire.go, ~3 lines in main.go + delegation methods
+// Compare:
+//   Manual:  report.NewService(dbWrite, dbRead)  — 0 extra code
+//   fx:      fx.Annotate + name tags             — extra params struct
+//   wire:    WriteDB/ReadDB wrapper types         — extra types + adapter
 //
-// ── ERROR DETECTION ────────────────────────────────────────────────────────
-// Remove platform.NewTemporalClient from wire.Build → wire generate fails:
-//   "wire: cannot find provider for shared.TemporalClient"
-// Caught before compilation — earlier than fx (which fails at app.Run())
-// but still requires a separate generate step unlike manual (pure compile).
-//
-// ── RUNTIME DEPENDENCY FOOTPRINT ──────────────────────────────────────────
-// wire is a BUILD TOOL ONLY — it does not ship in your binary.
-// The generated wire_gen.go contains only plain Go constructor calls.
-// Runtime dependency added: 0 (wire is a dev tool, not a runtime import)
-// This is fundamentally different from uber/fx which is a runtime dependency.
-//
-// ── AI ASSISTANCE ──────────────────────────────────────────────────────────
-// AI must know:
-// 1. The wireinject build tag and wire.Build() convention in wire.go
-// 2. That wire_gen.go is generated — never edit it manually
-// 3. To run `wire` after adding new providers
-// The wire.go file is readable and the graph is explicit (like manual).
-// Risk: AI may edit wire_gen.go directly instead of regenerating — wrong.
+// ── SCENARIO E: Runtime strategy selection (quota per provider) ────────────
+// Same as manual — buildQuotaCheckers constructs the map, wire provides it.
 //
 // ── NOTE: MAINTENANCE STATUS ──────────────────────────────────────────────
-// google/wire has been in maintenance mode since ~2022. No active development.
-// The tool works and is stable, but new features will not be added.
-// See: https://github.com/google/wire/issues/637
+// google/wire has been in maintenance mode since ~2022.
 package main
 
 import (
@@ -56,18 +30,21 @@ import (
 	api "github.com/kitchen-sink/03-wire/gen"
 	"github.com/kitchen-sink/03-wire/internal/compute"
 	"github.com/kitchen-sink/03-wire/internal/database"
+	"github.com/kitchen-sink/03-wire/internal/platform"
+	"github.com/kitchen-sink/03-wire/internal/quota"
+	"github.com/kitchen-sink/03-wire/internal/report"
 	"github.com/kitchen-sink/di-shared"
 )
-
-// ── Handlers ──────────────────────────────────────────────────────────────
 
 type handlers struct {
 	compute  *compute.Handler
 	database *database.Handler
+	report   *report.Handler
+	quota    *quota.Handler
 }
 
-func newHandlers(c *compute.Handler, d *database.Handler) *handlers {
-	return &handlers{compute: c, database: d}
+func newHandlers(c *compute.Handler, d *database.Handler, r *report.Handler, q *quota.Handler) *handlers {
+	return &handlers{compute: c, database: d, report: r, quota: q}
 }
 
 var _ api.StrictServerInterface = (*handlers)(nil)
@@ -84,13 +61,29 @@ func (h *handlers) CreateDatabase(ctx context.Context, req api.CreateDatabaseReq
 func (h *handlers) GetDatabase(ctx context.Context, req api.GetDatabaseRequestObject) (api.GetDatabaseResponseObject, error) {
 	return h.database.GetDatabase(ctx, req)
 }
+func (h *handlers) GetReport(ctx context.Context, req api.GetReportRequestObject) (api.GetReportResponseObject, error) {
+	return h.report.GetReport(ctx, req)
+}
+func (h *handlers) CheckQuota(ctx context.Context, req api.CheckQuotaRequestObject) (api.CheckQuotaResponseObject, error) {
+	return h.quota.CheckQuota(ctx, req)
+}
 
-// ── Server setup ──────────────────────────────────────────────────────────
+// SCENARIO D: adapter that converts wrapper types back to shared.DB
+// This is the boilerplate cost of wire's wrapper type approach.
+func newReportServiceFromWrapped(w platform.WriteDB, r platform.ReadDB) *report.Service {
+	return report.NewService(shared.DB(w), shared.DB(r))
+}
+
+// SCENARIO E: quota map — identical to manual
+func buildQuotaCheckers(cfg *shared.Config) quota.QuotaCheckers {
+	return quota.QuotaCheckers{
+		"gcp": platform.NewGCPQuotaChecker(cfg),
+		"aws": platform.NewAWSQuotaChecker(cfg),
+		"roc": platform.NewROCQuotaChecker(cfg),
+	}
+}
 
 func main() {
-	// initializeHandlers() is generated by wire in wire_gen.go.
-	// It contains the same plain Go constructor calls as 01-manual/buildApp()
-	// but written by the tool, not by hand.
 	app, err := initializeHandlers()
 	if err != nil {
 		slog.Error("failed to initialize", "error", err)
@@ -102,7 +95,6 @@ func main() {
 	e.Use(middleware.RequestIDWithConfig(middleware.RequestIDConfig{
 		Generator: func() string { return uuid.New().String() },
 	}))
-
 	e.HTTPErrorHandler = func(err error, c echo.Context) {
 		reqID := c.Response().Header().Get(echo.HeaderXRequestID)
 		var de *shared.DomainError

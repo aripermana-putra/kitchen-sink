@@ -12,9 +12,11 @@ import (
 // ── Config ────────────────────────────────────────────────────────────────
 
 type Config struct {
-	Port           string
-	K8sKubeconfig  string
-	TemporalHost   string
+	Port          string
+	K8sKubeconfig string
+	TemporalHost  string
+	WriteDBURL    string
+	ReadDBURL     string
 }
 
 func LoadConfig() *Config {
@@ -22,6 +24,8 @@ func LoadConfig() *Config {
 		Port:          "8080",
 		K8sKubeconfig: "/etc/kubeconfig",
 		TemporalHost:  "temporal:7233",
+		WriteDBURL:    "postgres://write-host/ucp",
+		ReadDBURL:     "postgres://read-host/ucp",
 	}
 }
 
@@ -36,6 +40,21 @@ type K8sClient interface {
 
 type TemporalClient interface {
 	StartWorkflow(ctx context.Context, workflowType, workflowID string, input any) (string, error)
+}
+
+// DB is a generic database interface.
+// Two instances of this interface (read + write) demonstrate the
+// "multiple same-type dependencies" / @Qualifier scenario.
+type DB interface {
+	Exec(ctx context.Context, query string, args ...any) error
+	Query(ctx context.Context, query string, args ...any) ([]map[string]any, error)
+}
+
+// QuotaChecker checks quota for a specific cloud provider.
+// Multiple implementations (GCP, AWS, ROC) demonstrate the
+// runtime strategy selection scenario.
+type QuotaChecker interface {
+	Check(ctx context.Context, tenantID, resourceType string) error
 }
 
 // ── Domain types ──────────────────────────────────────────────────────────
@@ -56,6 +75,21 @@ type DatabaseInstance struct {
 	Tier       string
 	Status     string
 	WorkflowID string
+}
+
+type ReportEntry struct {
+	ResourceName string
+	TenantID     string
+	Provider     string
+	Status       string
+}
+
+type QuotaResult struct {
+	TenantID     string
+	Provider     string
+	ResourceType string
+	Allowed      bool
+	Message      string
 }
 
 // ── Error types ───────────────────────────────────────────────────────────

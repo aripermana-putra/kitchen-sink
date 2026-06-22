@@ -1,23 +1,25 @@
 //go:build wireinject
 // +build wireinject
 
-// wire.go — wire injection spec. This file is used ONLY by the wire tool.
-// It is excluded from normal builds via the wireinject build tag.
-// Run `wire ./cmd/api-server/` to regenerate wire_gen.go.
+// wire.go — wire injection spec.
 //
-// ── SCENARIO B — Add 1 new feature slice (storage) ────────────────────────
-// Changes in this file:
-//   + storage.NewService in wire.Build   [+1 entry]
-//   + storage.NewHandler in wire.Build   [+1 entry]
-// Then run: wire ./cmd/api-server/
-// wire regenerates wire_gen.go automatically — no manual editing of wire_gen.go
+// ── SCENARIO D: Multiple same-type dependencies (dbRead + dbWrite) ─────────
+// wire also needs disambiguation for same-type deps — but the approach is
+// different from fx. Instead of name tags, wire requires separate provider
+// functions with distinct return types (wrapper types) OR explicit binding.
 //
-// ── ERROR DETECTION ────────────────────────────────────────────────────────
-// Remove platform.NewTemporalClient from wire.Build → wire generate fails:
-//   "cannot find provider for shared.TemporalClient"
-// The error surfaces at wire generate time — before any compilation.
-// Like manual, errors are caught before app.Run() but unlike manual,
-// a separate generate step is required.
+// Here we use a wrapper type approach:
+//   type WriteDB shared.DB
+//   type ReadDB  shared.DB
+// Then provide functions returning these wrapper types, and a constructor
+// that takes WriteDB + ReadDB (now distinct types to wire).
+//
+// This is more type-safe than fx's string name tags (compile-time checked)
+// but requires wrapper type boilerplate.
+//
+// ── SCENARIO E: Runtime strategy selection (quota per provider) ────────────
+// Same as manual — wire cannot construct map[string]QuotaChecker automatically.
+// buildQuotaCheckers is provided as a regular constructor returning QuotaCheckers.
 package main
 
 import (
@@ -26,22 +28,33 @@ import (
 	"github.com/kitchen-sink/03-wire/internal/compute"
 	"github.com/kitchen-sink/03-wire/internal/database"
 	"github.com/kitchen-sink/03-wire/internal/platform"
+	"github.com/kitchen-sink/03-wire/internal/quota"
+	"github.com/kitchen-sink/03-wire/internal/report"
 	"github.com/kitchen-sink/di-shared"
 )
 
-// initializeHandlers is the wire injector function.
-// wire reads this, resolves the full graph, and generates initializeHandlers
-// in wire_gen.go as plain Go constructor calls — zero runtime overhead.
 func initializeHandlers() (*handlers, error) {
 	wire.Build(
-		shared.LoadConfig,              // [WIRE 1]
-		platform.NewK8sClient,         // [WIRE 2]
-		platform.NewTemporalClient,     // [WIRE 3]
-		compute.NewService,             // [WIRE 4]
-		compute.NewHandler,             // [WIRE 5]
-		database.NewService,            // [WIRE 6]
-		database.NewHandler,            // [WIRE 7]
-		newHandlers,                    // [WIRE 8]
+		shared.LoadConfig,
+		platform.NewK8sClient,
+		platform.NewTemporalClient,
+		compute.NewService,
+		compute.NewHandler,
+		database.NewService,
+		database.NewHandler,
+
+		// SCENARIO D: wire uses wrapper types to disambiguate same-type deps
+		platform.NewWriteDBWrapped, // returns WriteDB (wrapper type)
+		platform.NewReadDBWrapped,  // returns ReadDB (wrapper type)
+		newReportServiceFromWrapped, // takes WriteDB + ReadDB
+		report.NewHandler,
+
+		// SCENARIO E: buildQuotaCheckers returns QuotaCheckers (named type)
+		buildQuotaCheckers,
+		quota.NewService,
+		quota.NewHandler,
+
+		newHandlers,
 	)
-	return nil, nil // wire replaces this body
+	return nil, nil
 }

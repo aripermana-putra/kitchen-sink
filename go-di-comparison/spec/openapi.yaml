@@ -100,6 +100,48 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /report:
+    get:
+      operationId: GetReport
+      summary: Get resource report for a tenant (uses read replica)
+      parameters:
+        - name: tenantId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResponse'
+
+  /quota/check:
+    post:
+      operationId: CheckQuota
+      summary: Check quota for a provider (runtime strategy selection)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckQuotaRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaResult'
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   schemas:
     CreateComputeRequest:
@@ -173,6 +215,44 @@ components:
           type: string
         status:
           type: string
+        message:
+          type: string
+
+    ReportEntry:
+      type: object
+      properties:
+        resourceName:
+          type: string
+        provider:
+          type: string
+        status:
+          type: string
+
+    ReportResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReportEntry'
+
+    CheckQuotaRequest:
+      type: object
+      required: [tenantId, provider, resourceType]
+      properties:
+        tenantId:
+          type: string
+        provider:
+          type: string
+          enum: [gcp, aws, roc]
+        resourceType:
+          type: string
+
+    QuotaResult:
+      type: object
+      properties:
+        allowed:
+          type: boolean
         message:
           type: string
 

@@ -1,39 +1,14 @@
 // 02-uber-fx: Dependency injection via uber/fx — reflection-based container.
 //
-// ── SCENARIO A — Initial wiring (2 feature slices: compute + database) ────
-// Wiring lines (fx.Provide + fx.Invoke): 11 lines  [marked with WIRE]
-// Files involved in wiring: 1 (this file only)
-// Error detection: runtime — app.Run() panics on missing/wrong dependency
+// ── SCENARIO D: Multiple same-type dependencies (dbRead + dbWrite) ─────────
+// Both are shared.DB — same interface type. fx resolves by type, so two
+// providers returning the same type causes a panic: "two providers for shared.DB".
 //
-// ── SCENARIO B — Add 1 new feature slice (storage) ────────────────────────
-// New files: internal/storage/service.go, internal/storage/handler.go
-// Changes in this file:
-//   + fx.Provide(storage.NewService)   [+1 line]
-//   + fx.Provide(storage.NewHandler)   [+1 line]
-//   + Add *storage.Handler to handlers struct   [+1 field]
-//   + delegation methods for storage endpoints  [+N lines]
-// Total main.go delta: ~3 lines + delegation methods
+// SOLUTION: fx.Annotate + name tags — extra boilerplate not needed with manual.
 //
-// ── ERROR DETECTION ────────────────────────────────────────────────────────
-// Remove fx.Provide(platform.NewTemporalClient) → app panics at app.Run():
-//   "missing type: *platform.temporalClient (did you mean to use fx.Provide?)"
-// The error is clear but only surfaces at runtime startup, not at compile time.
-// All imports still compile — the missing dependency is invisible to the compiler.
-//
-// ── AI ASSISTANCE ──────────────────────────────────────────────────────────
-// AI must know fx.Provide/fx.Invoke conventions and the fx.App lifecycle.
-// The dependency graph is implicit — fx resolves it by reflecting on constructor
-// signatures at runtime. Reading main.go alone does not show the full graph.
-// AI needs to know: "add fx.Provide for every new constructor, types must match".
-// A wrong type (e.g. providing *Service where *Handler is expected) compiles fine
-// but panics at app.Run() with a type mismatch error.
-//
-// ── DEPENDENCY FOOTPRINT ───────────────────────────────────────────────────
-// Direct dependency added: go.uber.org/fx v1.23.0
-// Transitive dependencies pulled in: ~12 packages
-// Packages actually used in application code: go.uber.org/fx only
-// The rest (go.uber.org/dig, go.uber.org/zap, etc.) are fx internals —
-// they ship in your binary but you never import them directly.
+// ── SCENARIO E: Runtime strategy selection (quota per provider) ────────────
+// fx cannot construct map[string]QuotaChecker automatically — you still build
+// the map manually. fx provides no benefit over manual here.
 package main
 
 import (
@@ -51,20 +26,20 @@ import (
 	"github.com/kitchen-sink/02-uber-fx/internal/compute"
 	"github.com/kitchen-sink/02-uber-fx/internal/database"
 	"github.com/kitchen-sink/02-uber-fx/internal/platform"
+	"github.com/kitchen-sink/02-uber-fx/internal/quota"
+	"github.com/kitchen-sink/02-uber-fx/internal/report"
 	"github.com/kitchen-sink/di-shared"
 )
-
-// ── Handlers ──────────────────────────────────────────────────────────────
 
 type handlers struct {
 	compute  *compute.Handler
 	database *database.Handler
+	report   *report.Handler
+	quota    *quota.Handler
 }
 
-// newHandlers is a constructor fx will call — it resolves the arguments
-// by matching their types against what was provided via fx.Provide.
-func newHandlers(c *compute.Handler, d *database.Handler) *handlers {
-	return &handlers{compute: c, database: d}
+func newHandlers(c *compute.Handler, d *database.Handler, r *report.Handler, q *quota.Handler) *handlers {
+	return &handlers{compute: c, database: d, report: r, quota: q}
 }
 
 var _ api.StrictServerInterface = (*handlers)(nil)
@@ -81,8 +56,37 @@ func (h *handlers) CreateDatabase(ctx context.Context, req api.CreateDatabaseReq
 func (h *handlers) GetDatabase(ctx context.Context, req api.GetDatabaseRequestObject) (api.GetDatabaseResponseObject, error) {
 	return h.database.GetDatabase(ctx, req)
 }
+func (h *handlers) GetReport(ctx context.Context, req api.GetReportRequestObject) (api.GetReportResponseObject, error) {
+	return h.report.GetReport(ctx, req)
+}
+func (h *handlers) CheckQuota(ctx context.Context, req api.CheckQuotaRequestObject) (api.CheckQuotaResponseObject, error) {
+	return h.quota.CheckQuota(ctx, req)
+}
 
-// ── Server ────────────────────────────────────────────────────────────────
+// ── SCENARIO D: fx.In params struct for named same-type dependencies ───────
+// Manual equivalent: report.NewService(dbWrite, dbRead) — two clear positional args.
+// fx requires this params struct + name tags on both provider and consumer side.
+
+type reportParams struct {
+	fx.In
+	Write shared.DB `name:"write"`
+	Read  shared.DB `name:"read"`
+}
+
+func newReportService(p reportParams) *report.Service {
+	return report.NewService(p.Write, p.Read)
+}
+
+// ── SCENARIO E: quota map — fx cannot provide this automatically ───────────
+// Build the map manually; supply it as a named type so fx can resolve it.
+
+func buildQuotaCheckers(cfg *shared.Config) quota.QuotaCheckers {
+	return quota.QuotaCheckers{
+		"gcp": platform.NewGCPQuotaChecker(cfg),
+		"aws": platform.NewAWSQuotaChecker(cfg),
+		"roc": platform.NewROCQuotaChecker(cfg),
+	}
+}
 
 type serverParams struct {
 	fx.In
@@ -96,7 +100,6 @@ func startServer(lc fx.Lifecycle, p serverParams) {
 	e.Use(middleware.RequestIDWithConfig(middleware.RequestIDConfig{
 		Generator: func() string { return uuid.New().String() },
 	}))
-
 	e.HTTPErrorHandler = func(err error, c echo.Context) {
 		reqID := c.Response().Header().Get(echo.HeaderXRequestID)
 		var de *shared.DomainError
@@ -115,35 +118,35 @@ func startServer(lc fx.Lifecycle, p serverParams) {
 		slog.Error("unhandled error", "error", err, "request_id", reqID)
 		c.JSON(500, map[string]string{"code": "INTERNAL_ERROR", "message": "an internal error occurred", "requestId": reqID})
 	}
-
 	api.RegisterHandlers(e, api.NewStrictHandler(p.Handlers, nil))
-
 	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error {
-			go e.Start(":" + p.Config.Port)
-			return nil
-		},
-		OnStop: func(ctx context.Context) error {
-			return e.Shutdown(ctx)
-		},
+		OnStart: func(ctx context.Context) error { go e.Start(":" + p.Config.Port); return nil },
+		OnStop:  func(ctx context.Context) error { return e.Shutdown(ctx) },
 	})
 }
 
-// ── Wiring ────────────────────────────────────────────────────────────────
-// fx resolves the graph by reflecting on constructor signatures at runtime.
-// Every type that a constructor needs must be provided somewhere in the app.
-
 func main() {
-	app := fx.New(
-		fx.Provide(shared.LoadConfig),                  // [WIRE 1]
-		fx.Provide(platform.NewK8sClient),              // [WIRE 2]
-		fx.Provide(platform.NewTemporalClient),         // [WIRE 3]
-		fx.Provide(compute.NewService),                 // [WIRE 4]
-		fx.Provide(compute.NewHandler),                 // [WIRE 5]
-		fx.Provide(database.NewService),                // [WIRE 6]
-		fx.Provide(database.NewHandler),                // [WIRE 7]
-		fx.Provide(newHandlers),                        // [WIRE 8]
-		fx.Invoke(startServer),                         // [WIRE 9] — runs at app.Run()
-	)
-	app.Run()
+	fx.New(
+		fx.Provide(shared.LoadConfig),
+		fx.Provide(platform.NewK8sClient),
+		fx.Provide(platform.NewTemporalClient),
+		fx.Provide(compute.NewService),
+		fx.Provide(compute.NewHandler),
+		fx.Provide(database.NewService),
+		fx.Provide(database.NewHandler),
+
+		// SCENARIO D: without fx.Annotate, fx panics "two providers for shared.DB"
+		fx.Provide(fx.Annotate(platform.NewWriteDB, fx.ResultTags(`name:"write"`))),
+		fx.Provide(fx.Annotate(platform.NewReadDB, fx.ResultTags(`name:"read"`))),
+		fx.Provide(newReportService), // uses reportParams with name tags
+		fx.Provide(report.NewHandler),
+
+		// SCENARIO E: map must be built manually — fx cannot auto-construct it
+		fx.Provide(buildQuotaCheckers),
+		fx.Provide(quota.NewService),
+		fx.Provide(quota.NewHandler),
+
+		fx.Provide(newHandlers),
+		fx.Invoke(startServer),
+	).Run()
 }

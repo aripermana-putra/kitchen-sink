@@ -33,6 +33,16 @@ All variants share:
 - Identical OpenAPI spec → same oapi-codegen generated code
 - The DI mechanism ONLY affects `cmd/api-server/main.go` (and `wire.go` for 03)
 
+## Scenarios
+
+| # | What it demonstrates |
+|---|---|
+| A | Initial wiring — 2 feature slices (compute + database) |
+| B | Add 1 new feature slice — cost of extending the graph |
+| C | Missing dependency bug — when does each approach detect it? |
+| D | Multiple same-type deps — `dbWrite` + `dbRead`, same `shared.DB` interface |
+| E | Runtime strategy selection — `QuotaChecker` selected per request by provider |
+
 ## Quantitative results
 
 ### Scenario A — Initial wiring (2 feature slices)
@@ -96,6 +106,36 @@ These ship in your binary but you never import them directly — they are fx int
 
 **wire note:** `google/wire` is a build tool only. The generated `wire_gen.go` contains
 plain Go constructor calls with zero runtime imports. Runtime footprint = 0.
+
+### Scenario D — Multiple same-type dependencies (dbWrite + dbRead)
+
+Both are `shared.DB` — same interface type. How does each approach distinguish them?
+
+| | Manual | uber/fx | google/wire |
+|---|---|---|---|
+| Approach | Positional args | `fx.Annotate` + string name tags | Wrapper types (`WriteDB`, `ReadDB`) |
+| Extra code | 0 | `reportParams` struct + `fx.In` + name tags on provider AND consumer | `WriteDB`/`ReadDB` wrapper types in `platform/db_wire.go` + adapter function |
+| Type safety | Compile time | String tags — typo compiles, fails at `app.Run()` | Compile time — wrong type = build fails |
+| Readability | `NewService(dbWrite, dbRead)` — intent clear | Name tags in struct tags — intent hidden | Wrapper types explicit but verbose |
+
+Manual wins clearly. fx's string tags are the least safe option. wire's wrapper types are compile-safe but add boilerplate that manual doesn't need.
+
+### Scenario E — Runtime strategy selection (quota per provider)
+
+`QuotaChecker` has 3 implementations (GCP, AWS, ROC). Strategy selected per request.
+
+All three approaches are **identical** — all must build the map manually:
+```go
+quota.QuotaCheckers{
+    "gcp": platform.NewGCPQuotaChecker(cfg),
+    "aws": platform.NewAWSQuotaChecker(cfg),
+    "roc": platform.NewROCQuotaChecker(cfg),
+}
+```
+
+fx cannot auto-construct `map[string]QuotaChecker` from individual providers.
+wire cannot either. The map construction is business logic, not a DI concern.
+DI framework adds zero value for this pattern.
 
 ## Qualitative findings
 
