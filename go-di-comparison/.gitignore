@@ -1,0 +1,18 @@
+# Compiled binaries
+*/cmd/*/api-server
+*/cmd/api-server/api-server
+
+# Generated code — regenerate with: make generate
+*/gen/
+
+# wire_gen.go is generated — do not commit
+# Regenerate with: wire gen ./cmd/api-server/
+03-wire/cmd/api-server/wire_gen.go
+
+# Go workspace sum
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
