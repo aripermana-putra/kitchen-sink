@@ -1,12 +1,12 @@
 // 03-chi-standard: chi with manual handlers — no code generation.
 //
 // Key things to observe:
-// - chi has NO native global error handler — handlers must write responses directly
-//   OR you build a custom middleware to intercept errors (extra boilerplate)
-// - This is the standard chi pattern: each handler is responsible for its own errors
-// - Compare: echo's HTTPErrorHandler is one function; chi requires a shared helper
-//   that every handler must remember to call — discipline-dependent, not enforced
-// - Request binding: manual json.NewDecoder — no c.Bind() equivalent
+//   - chi has NO native global error handler — handlers must write responses directly
+//     OR you build a custom middleware to intercept errors (extra boilerplate)
+//   - This is the standard chi pattern: each handler is responsible for its own errors
+//   - Compare: echo's HTTPErrorHandler is one function; chi requires a shared helper
+//     that every handler must remember to call — discipline-dependent, not enforced
+//   - Request binding: manual json.NewDecoder — no c.Bind() equivalent
 package main
 
 import (
