@@ -1,43 +1,93 @@
-// lifecycle.go — Scenario F: graceful shutdown via fx.Hook.
+// lifecycle.go — Scenario F + F2: graceful shutdown via fx.Hook.
 //
-// fx.Hook{OnStart, OnStop} is the fx equivalent of manual signal handling.
+// F:  Single-component (already in startServer via fx.Hook)
+// F2: Multi-component ordered shutdown registered via fx.Invoke
 //
-// CONTRAST with 01-manual and 03-wire:
+// FX APPROACH — shutdown order is REVERSE of OnStart registration order.
+// To get HTTP stopped FIRST, register HTTP hook LAST:
 //
-//   Manual/wire (~10 lines):
-//     go srv.ListenAndServe()
-//     ctx, stop := signal.NotifyContext(..., syscall.SIGTERM)
-//     <-ctx.Done()
-//     srv.Shutdown(shutdownCtx)
+//   lc.Append(k8sHook)       // registered 1st → stopped LAST
+//   lc.Append(temporalHook)  // registered 2nd → stopped 2nd
+//   lc.Append(httpHook)      // registered 3rd → stopped FIRST ✓
 //
-//   fx (~same lines, different structure):
-//     lc.Append(fx.Hook{
-//         OnStart: func(ctx context.Context) error { go srv.Start(); return nil },
-//         OnStop:  func(ctx context.Context) error { return srv.Shutdown(ctx) },
-//     })
+// This reverse-registration convention is non-obvious.
+// Compare to 01-manual where shutdown order = statement order.
 //
-// WHEN fx LIFECYCLE ADDS REAL VALUE:
-//   Multiple components with ordered shutdown requirements:
-//
-//     lc.Append(httpHook)     // OnStop: stop accepting requests first
-//     lc.Append(metricsHook)  // OnStop: flush metrics after HTTP drains
-//     lc.Append(dbHook)       // OnStop: close DB last
-//
-//   fx guarantees OnStop runs in REVERSE OnStart order automatically:
-//     Start order:  HTTP → Metrics → DB
-//     Stop order:   DB → Metrics → HTTP  (automatic)
-//
-//   With manual code, you manage this ordering yourself via multiple
-//   signal handlers or explicit sequencing — more error-prone as
-//   the number of components grows.
-//
-// FOR UCP (1 HTTP server, optional Temporal drain):
-//   Manual is sufficient. The ordering is obvious.
-//   fx lifecycle becomes genuinely useful at 3+ components with
-//   non-trivial shutdown dependencies.
+// WHEN FX LIFECYCLE WINS:
+//   At 5+ components with non-trivial dependencies, manual sequencing
+//   becomes error-prone. fx's automatic reverse-order guarantee prevents
+//   ordering bugs. For UCP's 3 components, both approaches are equivalent.
 package main
 
-// fx.Hook is defined inline in main.go startServer() function.
-// See the OnStart/OnStop hooks in startServer() — that IS this file's content.
-// No additional code needed here; the hook is wired inside startServer()
-// which is already registered via fx.Invoke(startServer).
+import (
+	"context"
+	"log/slog"
+	"net/http"
+
+	"go.uber.org/fx"
+)
+
+// Stubs — in real UCP these would be actual client types from the DI graph.
+type fxTemporalStopper interface{ Stop() }
+type fxK8sCloser interface{ Close() }
+
+type noopFxTemporal struct{}
+
+func (n *noopFxTemporal) Stop() { slog.Info("temporal worker stopped") }
+
+type noopFxK8s struct{}
+
+func (n *noopFxK8s) Close() { slog.Info("k8s client closed") }
+
+// orderLifecycleParams groups the components whose lifecycle we manage.
+type orderLifecycleParams struct {
+	fx.In
+	Server  *http.Server
+	Worker  fxTemporalStopper
+	K8s     fxK8sCloser
+}
+
+// RegisterOrderedLifecycle registers OnStart/OnStop hooks for all components.
+// Registered via fx.Invoke in main() — fx calls this during app.Run().
+//
+// IMPORTANT: hooks registered in reverse shutdown order so fx's reverse
+// execution gives us the correct sequence: HTTP stopped first.
+func RegisterOrderedLifecycle(lc fx.Lifecycle, p orderLifecycleParams) {
+	// Register K8s first → stopped last
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error { return nil },
+		OnStop: func(ctx context.Context) error {
+			p.K8s.Close()
+			return nil
+		},
+	})
+
+	// Register Temporal second → stopped second
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error { return nil },
+		OnStop: func(ctx context.Context) error {
+			p.Worker.Stop()
+			return nil
+		},
+	})
+
+	// Register HTTP last → stopped first (what we want)
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			go func() {
+				slog.Info("http server starting")
+				if err := p.Server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+					slog.Error("http error", "error", err)
+				}
+			}()
+			return nil
+		},
+		OnStop: func(ctx context.Context) error {
+			if err := p.Server.Shutdown(ctx); err != nil {
+				slog.Error("http shutdown error", "error", err)
+			}
+			slog.Info("http stopped")
+			return nil
+		},
+	})
+}

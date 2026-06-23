@@ -1,25 +1,21 @@
-// lifecycle.go — Scenario F: graceful shutdown (OnStart/OnStop equivalent).
+// lifecycle.go — Scenario F + F2: graceful shutdown implementation.
 //
-// Manual approach uses stdlib signal handling.
-// This is the SAME pattern whether you use manual injection or wire —
-// wire only generates constructor calls, it has no lifecycle management.
+// F:  Single-component shutdown (HTTP only)
+// F2: Multi-component ordered shutdown (HTTP → Temporal → K8s)
 //
-// MANUAL / WIRE equivalent of fx.Hook{OnStart, OnStop}:
+// For UCP, F2 is the realistic scenario. The shutdown order matters:
+//   1. HTTP first  — stop accepting new requests
+//   2. Temporal    — drain in-flight workflow submissions
+//   3. K8s         — close cluster connections last
 //
-//   OnStart equivalent: go srv.Start(port)
-//   OnStop equivalent:  signal.NotifyContext → srv.Shutdown()
+// MANUAL vs FX:
+//   Manual (this file): order is explicit — statement order = shutdown order.
+//   fx (02-uber-fx):    order is implicit — REVERSE of hook registration order.
+//                       Must register K8s → Temporal → HTTP to get HTTP stopped first.
 //
-// The manual approach is ~10 lines of stdlib code.
-// Compare to 02-uber-fx/cmd/api-server/lifecycle.go which uses fx.Hook.
-//
-// When does fx lifecycle add real value?
-//   - Multiple components need ordered shutdown (e.g. stop HTTP first,
-//     then flush metrics, then close DB — in that exact order)
-//   - fx guarantees OnStop runs in reverse OnStart order automatically
-//   - Manual: you manage the order yourself
-//
-// For UCP (1 HTTP server + optional graceful Temporal drain):
-//   Manual is sufficient — the ordering is obvious and trivial.
+// For UCP's 3 components, manual is simpler and more readable.
+// fx lifecycle ordering adds value at 5+ components where manual sequencing
+// becomes error-prone — not at UCP's current scale.
 package main
 
 import (
@@ -30,35 +26,70 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/labstack/echo/v4"
 )
 
-// startWithGracefulShutdown starts the Echo server and blocks until
-// SIGTERM or SIGINT, then performs graceful shutdown.
-// This is the manual equivalent of fx.Hook{OnStart, OnStop}.
-func startWithGracefulShutdown(srv *http.Server) {
-	// OnStart equivalent — start in background
+// ── Stub interfaces ───────────────────────────────────────────────────────
+// In real UCP these would be the actual Temporal and K8s client types.
+// Stubbed here so the shutdown pattern is demonstrable without real infrastructure.
+
+type temporalWorkerStopper interface {
+	Stop()
+}
+
+type k8sClientCloser interface {
+	Close()
+}
+
+type noopTemporalWorker struct{}
+
+func (n *noopTemporalWorker) Stop() {
+	slog.Info("temporal worker stopped")
+}
+
+type noopK8sClient struct{}
+
+func (n *noopK8sClient) Close() {
+	slog.Info("k8s client closed")
+}
+
+// ── Scenario F2: ordered graceful shutdown ────────────────────────────────
+
+// runWithOrderedShutdown starts the Echo server and all components,
+// then waits for SIGTERM/SIGINT and shuts down in the correct order.
+// Called from main() — this replaces e.Logger.Fatal(e.Start(...)).
+func runWithOrderedShutdown(e *echo.Echo, temporal temporalWorkerStopper, k8s k8sClientCloser, port string) {
+	// Start HTTP server in background
 	go func() {
-		slog.Info("server starting", "addr", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server error", "error", err)
+		slog.Info("http server starting", "port", port)
+		if err := e.Start(":" + port); err != nil && err != http.ErrServerClosed {
+			slog.Error("http server error", "error", err)
 			os.Exit(1)
 		}
 	}()
 
-	// Wait for shutdown signal (SIGTERM from Kubernetes, SIGINT from Ctrl+C)
+	// Block until shutdown signal
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	<-ctx.Done()
 
-	slog.Info("shutdown signal received, draining...")
+	slog.Info("shutdown signal received — draining in order")
 
-	// OnStop equivalent — graceful shutdown with timeout
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		slog.Error("shutdown error", "error", err)
+	// Step 1: stop HTTP — no new requests accepted after this point
+	if err := e.Shutdown(shutdownCtx); err != nil {
+		slog.Error("http shutdown error", "error", err)
 	}
+	slog.Info("http stopped")
 
-	slog.Info("server stopped cleanly")
+	// Step 2: drain Temporal — finish in-progress workflow submissions
+	temporal.Stop()
+
+	// Step 3: close K8s connections
+	k8s.Close()
+
+	slog.Info("shutdown complete")
 }

@@ -116,6 +116,7 @@ func main() {
 
 	api.RegisterHandlers(e, api.NewStrictHandler(app, nil))
 
-	slog.Info("03-wire listening", "port", 8083)
-	e.Logger.Fatal(e.Start(":8083"))
+	// Scenario F2: ordered graceful shutdown — identical to 01-manual.
+	// wire has no lifecycle management — this is always manual.
+	runWithOrderedShutdown(e, &noopTemporalWorker{}, &noopK8sClient{}, "8083")
 }

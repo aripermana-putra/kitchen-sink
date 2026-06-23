@@ -148,5 +148,12 @@ func main() {
 
 		fx.Provide(newHandlers),
 		fx.Invoke(startServer),
+
+		// Scenario F2: ordered multi-component graceful shutdown.
+		// Stubs used here — in real UCP pass actual temporal worker + k8s client.
+		// Note: hooks registered in reverse shutdown order (fx reverses for OnStop).
+		fx.Provide(func() fxTemporalStopper { return &noopFxTemporal{} }),
+		fx.Provide(func() fxK8sCloser { return &noopFxK8s{} }),
+		fx.Invoke(RegisterOrderedLifecycle),
 	).Run()
 }

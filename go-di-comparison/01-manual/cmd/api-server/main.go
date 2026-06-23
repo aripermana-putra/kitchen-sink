@@ -160,6 +160,7 @@ func main() {
 
 	api.RegisterHandlers(e, api.NewStrictHandler(app, nil))
 
-	slog.Info("01-manual listening", "port", 8081)
-	e.Logger.Fatal(e.Start(":8081"))
+	// Scenario F2: ordered graceful shutdown — HTTP → Temporal → K8s.
+	// In real UCP, pass actual temporal worker and k8s client instances.
+	runWithOrderedShutdown(e, &noopTemporalWorker{}, &noopK8sClient{}, "8081")
 }
