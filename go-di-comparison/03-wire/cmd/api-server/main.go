@@ -27,8 +27,12 @@
 // ── SCENARIO E: Runtime strategy selection (quota per provider) ────────────
 // Same as manual — buildQuotaCheckers constructs the map, wire provides it.
 //
-// ── SCENARIO F2: Ordered graceful shutdown ─────────────────────────────────
-// Identical to 01-manual — wire has no lifecycle management.
+// ── SCENARIO F — Single-component graceful shutdown (HTTP only) ────────────
+// See lifecycle.go — identical to 01-manual, wire has no lifecycle management.
+//
+// ── SCENARIO F2: Ordered graceful shutdown (HTTP → Temporal → K8s) ─────────
+// See lifecycle.go — runWithOrderedShutdown(), identical to 01-manual.
+// wire has no lifecycle management — always manual regardless.
 //
 // ── NOTE: MAINTENANCE STATUS ──────────────────────────────────────────────
 // google/wire has been in maintenance mode since ~2022.

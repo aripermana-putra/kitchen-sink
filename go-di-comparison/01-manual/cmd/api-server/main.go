@@ -7,6 +7,11 @@
 // Add internal/storage/service.go + handler.go
 // Add 2 lines to buildApp() + delegation methods in handlers struct
 //
+// ── SCENARIO C — Missing dependency bug ───────────────────────────────────
+// Remove `temporal` from compute.NewService(k8s, temporal) → immediate build:
+//   "not enough arguments in call to compute.NewService"
+// Caught at compile time — no binary produced, no process started.
+//
 // ── SCENARIO D — Multiple same-type dependencies (dbRead + dbWrite) ────────
 // Both are shared.DB — same interface, different instances.
 // Manual: just two positional args — clear, compiler-enforced.
@@ -19,6 +24,13 @@
 // All implementations are wired at startup into a map.
 // This pattern is identical across all 3 DI approaches —
 // the dispatch logic is in the service, not the DI framework.
+//
+// ── SCENARIO F — Single-component graceful shutdown (HTTP only) ────────────
+// See lifecycle.go — signal.NotifyContext + e.Shutdown().
+//
+// ── SCENARIO F2 — Ordered multi-component shutdown (HTTP → Temporal → K8s) ─
+// See lifecycle.go — runWithOrderedShutdown().
+// Statement order = shutdown order — explicit and readable.
 //
 // ── ERROR DETECTION ────────────────────────────────────────────────────────
 // Remove `dbWrite` from report.NewService(dbWrite, dbRead) → immediate build:

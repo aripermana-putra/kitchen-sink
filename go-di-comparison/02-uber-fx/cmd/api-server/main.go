@@ -21,7 +21,10 @@
 // ── SCENARIO E: Runtime strategy selection (quota per provider) ────────────
 // fx cannot construct map[string]QuotaChecker automatically — build map manually.
 //
-// ── SCENARIO F2: Ordered graceful shutdown ─────────────────────────────────
+// ── SCENARIO F — Single-component graceful shutdown (HTTP only) ────────────
+// See lifecycle.go — OnStart/OnStop hook for HTTP server only.
+//
+// ── SCENARIO F2: Ordered multi-component shutdown (HTTP → Temporal → K8s) ──
 // All lifecycle hooks registered in startServer — one function owns all lifecycle.
 // Hooks registered in dependency order; fx reverses for OnStop automatically:
 //   Registration: K8s → Temporal → HTTP
