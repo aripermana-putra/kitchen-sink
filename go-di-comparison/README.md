@@ -91,6 +91,30 @@ wire: no provider found for shared.TemporalClient
       needed by *handlers in provider "newHandlers"
 ```
 
+### Binary size
+
+| | 01-manual | 02-uber-fx | 03-wire |
+|---|---|---|---|
+| Binary size | 9.5 MB | **15 MB** | 9.5 MB |
+| Delta vs manual | — | +5.5 MB (+58%) | 0 |
+
+uber/fx adds 5.5 MB to the binary — zap, dig, multierr and other fx internals ship
+in the binary even though only `go.uber.org/fx` is directly imported.
+wire is a build tool only — zero binary size impact.
+
+### Startup time — fx reflection overhead
+
+fx logs each constructor's reflection resolution time. For 16 components:
+
+```
+Total fx reflection overhead: ~31µs
+Annotated providers (Scenario D) take longer: 7.5µs vs 1-3µs for regular providers
+```
+
+Practically: **negligible**. 31µs total is not a meaningful startup cost.
+The reflection overhead of fx is not a performance concern — the binary size
+and late error detection are the real costs.
+
 ### Dependency footprint
 
 | | 01-manual | 02-uber-fx | 03-wire |
