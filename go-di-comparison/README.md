@@ -42,7 +42,8 @@ All variants share:
 | C | Missing dependency bug — when does each approach detect it? |
 | D | Multiple same-type deps — `dbWrite` + `dbRead`, same `shared.DB` interface |
 | E | Runtime strategy selection — `QuotaChecker` selected per request by provider |
-| F | Graceful shutdown — OnStart/OnStop equivalent across all 3 approaches |
+| F | Graceful shutdown — single component (HTTP server only) |
+| F2 | Graceful shutdown — ordered multi-component (HTTP → Temporal → K8s) |
 
 ## Quantitative results
 
@@ -203,6 +204,44 @@ dependencies. wire never helps here — lifecycle is always manual regardless of
 
 **Key distinction:** wire = DI wiring only. fx = DI wiring + lifecycle management.
 If you need structured lifecycle with wire, you write the signal handling yourself.
+
+### Scenario F2 — Ordered multi-component graceful shutdown
+
+UCP's realistic shutdown sequence: HTTP → Temporal worker → K8s client.
+
+| | Manual | uber/fx | wire |
+|---|---|---|---|
+| Mechanism | `signal.NotifyContext` + explicit sequence | `fx.Hook{OnStart, OnStop}` | Same as manual |
+| Lines of code | ~20 | ~25 | ~20 |
+| Ordering | **Explicit** — statement order | **Implicit** — reverse of hook registration order | **Explicit** |
+| Hidden complexity | None | Must register hooks in reverse shutdown order | None |
+
+**The non-obvious fx convention:**
+
+To get shutdown order `HTTP → Temporal → K8s`, you must register hooks in the
+**reverse** order — `K8s → Temporal → HTTP`:
+```go
+// Registration order (counterintuitive):
+lc.Append(k8sHook)       // registered first → stopped last
+lc.Append(temporalHook)  // registered second → stopped second
+lc.Append(httpHook)      // registered last → stopped first ← what we want
+```
+
+With manual code, the shutdown sequence is just the order of statements:
+```go
+srv.Shutdown(ctx)        // stopped first — obvious
+temporalWorker.Stop()    // stopped second — obvious
+k8sClient.Close()        // stopped last — obvious
+```
+
+**Conclusion:** for UCP's 3 components, manual ordered shutdown is equally simple and
+more readable than fx's hook system. fx's reverse-order convention is non-obvious
+and requires framework knowledge to read correctly.
+
+See the implementation files:
+- `01-manual/cmd/api-server/lifecycle_ordered.go`
+- `02-uber-fx/cmd/api-server/lifecycle_ordered.go`
+- `03-wire/cmd/api-server/lifecycle_ordered.go`
 
 ## Qualitative findings
 
