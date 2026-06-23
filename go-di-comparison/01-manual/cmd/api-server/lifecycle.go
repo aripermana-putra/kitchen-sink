@@ -4,14 +4,15 @@
 // F2: Multi-component ordered shutdown (HTTP → Temporal → K8s)
 //
 // For UCP, F2 is the realistic scenario. The shutdown order matters:
-//   1. HTTP first  — stop accepting new requests
-//   2. Temporal    — drain in-flight workflow submissions
-//   3. K8s         — close cluster connections last
+//  1. HTTP first  — stop accepting new requests
+//  2. Temporal    — drain in-flight workflow submissions
+//  3. K8s         — close cluster connections last
 //
 // MANUAL vs FX:
-//   Manual (this file): order is explicit — statement order = shutdown order.
-//   fx (02-uber-fx):    order is implicit — REVERSE of hook registration order.
-//                       Must register K8s → Temporal → HTTP to get HTTP stopped first.
+//
+//	Manual (this file): order is explicit — statement order = shutdown order.
+//	fx (02-uber-fx):    order is implicit — REVERSE of hook registration order.
+//	                    Must register K8s → Temporal → HTTP to get HTTP stopped first.
 //
 // For UCP's 3 components, manual is simpler and more readable.
 // fx lifecycle ordering adds value at 5+ components where manual sequencing

@@ -3,12 +3,17 @@
 // ── SCENARIO D: Multiple same-type dependencies (dbRead + dbWrite) ─────────
 // Both are shared.DB — same interface type. fx resolves by type, so two
 // providers returning the same type causes a panic: "two providers for shared.DB".
-//
 // SOLUTION: fx.Annotate + name tags — extra boilerplate not needed with manual.
 //
 // ── SCENARIO E: Runtime strategy selection (quota per provider) ────────────
-// fx cannot construct map[string]QuotaChecker automatically — you still build
-// the map manually. fx provides no benefit over manual here.
+// fx cannot construct map[string]QuotaChecker automatically — build map manually.
+//
+// ── SCENARIO F2: Ordered graceful shutdown ─────────────────────────────────
+// All lifecycle hooks registered in startServer — one function owns all lifecycle.
+// Hooks registered in REVERSE shutdown order so fx's OnStop runs correctly:
+//   Registration: K8s → Temporal → HTTP
+//   OnStop order: HTTP → Temporal → K8s  ✓ (fx reverses automatically)
+// Compare to 01-manual where shutdown order = statement order — more readable.
 package main
 
 import (
@@ -64,8 +69,6 @@ func (h *handlers) CheckQuota(ctx context.Context, req api.CheckQuotaRequestObje
 }
 
 // ── SCENARIO D: fx.In params struct for named same-type dependencies ───────
-// Manual equivalent: report.NewService(dbWrite, dbRead) — two clear positional args.
-// fx requires this params struct + name tags on both provider and consumer side.
 
 type reportParams struct {
 	fx.In
@@ -77,8 +80,7 @@ func newReportService(p reportParams) *report.Service {
 	return report.NewService(p.Write, p.Read)
 }
 
-// ── SCENARIO E: quota map — fx cannot provide this automatically ───────────
-// Build the map manually; supply it as a named type so fx can resolve it.
+// ── SCENARIO E: quota map ─────────────────────────────────────────────────
 
 func buildQuotaCheckers(cfg *shared.Config) quota.QuotaCheckers {
 	return quota.QuotaCheckers{
@@ -88,12 +90,21 @@ func buildQuotaCheckers(cfg *shared.Config) quota.QuotaCheckers {
 	}
 }
 
+// ── SCENARIO F2: server + ordered lifecycle ───────────────────────────────
+
 type serverParams struct {
 	fx.In
 	Handlers *handlers
 	Config   *shared.Config
+	Worker   fxTemporalStopper
+	K8s      fxK8sCloser
 }
 
+// startServer sets up Echo and registers ALL lifecycle hooks in one place.
+// Hooks are registered in reverse shutdown order — fx reverses for OnStop:
+//
+//	Registration: K8s → Temporal → HTTP
+//	OnStop order: HTTP → Temporal → K8s  ✓
 func startServer(lc fx.Lifecycle, p serverParams) {
 	e := echo.New()
 	e.HideBanner = true
@@ -119,6 +130,16 @@ func startServer(lc fx.Lifecycle, p serverParams) {
 		c.JSON(500, map[string]string{"code": "INTERNAL_ERROR", "message": "an internal error occurred", "requestId": reqID})
 	}
 	api.RegisterHandlers(e, api.NewStrictHandler(p.Handlers, nil))
+
+	// Register K8s first → stopped last
+	lc.Append(fx.Hook{
+		OnStop: func(ctx context.Context) error { p.K8s.Close(); return nil },
+	})
+	// Register Temporal second → stopped second
+	lc.Append(fx.Hook{
+		OnStop: func(ctx context.Context) error { p.Worker.Stop(); return nil },
+	})
+	// Register HTTP last → stopped first
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error { go e.Start(":" + p.Config.Port); return nil },
 		OnStop:  func(ctx context.Context) error { return e.Shutdown(ctx) },
@@ -138,22 +159,20 @@ func main() {
 		// SCENARIO D: without fx.Annotate, fx panics "two providers for shared.DB"
 		fx.Provide(fx.Annotate(platform.NewWriteDB, fx.ResultTags(`name:"write"`))),
 		fx.Provide(fx.Annotate(platform.NewReadDB, fx.ResultTags(`name:"read"`))),
-		fx.Provide(newReportService), // uses reportParams with name tags
+		fx.Provide(newReportService),
 		fx.Provide(report.NewHandler),
 
-		// SCENARIO E: map must be built manually — fx cannot auto-construct it
+		// SCENARIO E: map built manually
 		fx.Provide(buildQuotaCheckers),
 		fx.Provide(quota.NewService),
 		fx.Provide(quota.NewHandler),
 
 		fx.Provide(newHandlers),
-		fx.Invoke(startServer),
 
-		// Scenario F2: ordered multi-component graceful shutdown.
-		// Stubs used here — in real UCP pass actual temporal worker + k8s client.
-		// Note: hooks registered in reverse shutdown order (fx reverses for OnStop).
+		// SCENARIO F2: stubs for temporal + k8s — real UCP passes actual clients
 		fx.Provide(func() fxTemporalStopper { return &noopFxTemporal{} }),
 		fx.Provide(func() fxK8sCloser { return &noopFxK8s{} }),
-		fx.Invoke(RegisterOrderedLifecycle),
+
+		fx.Invoke(startServer),
 	).Run()
 }
