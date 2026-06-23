@@ -1,5 +1,18 @@
 // 02-uber-fx: Dependency injection via uber/fx — reflection-based container.
 //
+// ── SCENARIO A — Initial wiring (2 feature slices: compute + database) ────
+// Wiring: fx.Provide per constructor + fx.Invoke to start — same line count as manual.
+//
+// ── SCENARIO B — Add 1 new feature slice (storage) ────────────────────────
+// Add internal/storage/service.go + handler.go
+// Add fx.Provide(storage.NewService) + fx.Provide(storage.NewHandler) to main()
+//
+// ── SCENARIO C — Missing dependency bug ───────────────────────────────────
+// Remove fx.Provide(platform.NewTemporalClient) → app.Run() panics:
+//   "[Fx] ERROR: missing type: shared.TemporalClient"
+// Detected at startup — binary builds fine, process starts then fails.
+// Compare to 01-manual: caught at compile time.
+//
 // ── SCENARIO D: Multiple same-type dependencies (dbRead + dbWrite) ─────────
 // Both are shared.DB — same interface type. fx resolves by type, so two
 // providers returning the same type causes a panic: "two providers for shared.DB".
@@ -10,10 +23,10 @@
 //
 // ── SCENARIO F2: Ordered graceful shutdown ─────────────────────────────────
 // All lifecycle hooks registered in startServer — one function owns all lifecycle.
-// Hooks registered in REVERSE shutdown order so fx's OnStop runs correctly:
+// Hooks registered in dependency order; fx reverses for OnStop automatically:
 //   Registration: K8s → Temporal → HTTP
-//   OnStop order: HTTP → Temporal → K8s  ✓ (fx reverses automatically)
-// Compare to 01-manual where shutdown order = statement order — more readable.
+//   OnStop order: HTTP → Temporal → K8s  ✓
+// Compare to 01-manual where shutdown order = statement order — more explicit.
 package main
 
 import (

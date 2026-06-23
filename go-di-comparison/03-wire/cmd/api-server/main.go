@@ -1,5 +1,19 @@
 // 03-wire: Dependency injection via google/wire — code generation.
 //
+// ── SCENARIO A — Initial wiring (2 feature slices: compute + database) ────
+// Wiring: declare constructors in wire.go → wire gen → plain Go calls in wire_gen.go.
+// Same line count as manual, but requires a separate generate step.
+//
+// ── SCENARIO B — Add 1 new feature slice (storage) ────────────────────────
+// Add internal/storage/service.go + handler.go
+// Add storage.NewService + storage.NewHandler to wire.Build() in wire.go
+// Run: wire gen ./cmd/api-server/
+//
+// ── SCENARIO C — Missing dependency bug ───────────────────────────────────
+// Remove platform.NewTemporalClient from wire.Build() → wire gen fails:
+//   "wire: no provider found for shared.TemporalClient"
+// Caught at generate time — before compilation, earlier than fx.
+//
 // ── SCENARIO D: Multiple same-type dependencies (dbRead + dbWrite) ─────────
 // wire uses WRAPPER TYPES to distinguish same-type deps — more type-safe than
 // fx's string name tags but requires extra boilerplate (WriteDB, ReadDB types
@@ -12,6 +26,9 @@
 //
 // ── SCENARIO E: Runtime strategy selection (quota per provider) ────────────
 // Same as manual — buildQuotaCheckers constructs the map, wire provides it.
+//
+// ── SCENARIO F2: Ordered graceful shutdown ─────────────────────────────────
+// Identical to 01-manual — wire has no lifecycle management.
 //
 // ── NOTE: MAINTENANCE STATUS ──────────────────────────────────────────────
 // google/wire has been in maintenance mode since ~2022.
