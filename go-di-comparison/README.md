@@ -42,6 +42,7 @@ All variants share:
 | C | Missing dependency bug — when does each approach detect it? |
 | D | Multiple same-type deps — `dbWrite` + `dbRead`, same `shared.DB` interface |
 | E | Runtime strategy selection — `QuotaChecker` selected per request by provider |
+| F | Graceful shutdown — OnStart/OnStop equivalent across all 3 approaches |
 
 ## Quantitative results
 
@@ -160,6 +161,48 @@ quota.QuotaCheckers{
 fx cannot auto-construct `map[string]QuotaChecker` from individual providers.
 wire cannot either. The map construction is business logic, not a DI concern.
 DI framework adds zero value for this pattern.
+
+### Scenario F — Graceful shutdown (OnStart/OnStop)
+
+| | Manual | uber/fx | google/wire |
+|---|---|---|---|
+| Mechanism | `signal.NotifyContext` + `srv.Shutdown()` | `fx.Hook{OnStart, OnStop}` | Same as manual — wire has no lifecycle |
+| Lines of code | ~10 | ~6 (hook inline) | ~10 (identical to manual) |
+| Ordered multi-component shutdown | Manual sequencing | **Automatic reverse order** | Manual sequencing |
+
+**Manual / wire (~10 lines, stdlib only):**
+```go
+go srv.ListenAndServe()
+ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+defer stop()
+<-ctx.Done()
+shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+defer cancel()
+srv.Shutdown(shutdownCtx)
+```
+
+**uber/fx (inline in startServer via fx.Invoke):**
+```go
+lc.Append(fx.Hook{
+    OnStart: func(ctx context.Context) error { go srv.Start(port); return nil },
+    OnStop:  func(ctx context.Context) error { return srv.Shutdown(ctx) },
+})
+```
+
+**When fx lifecycle adds real value:** multiple components with ordered shutdown:
+```go
+lc.Append(httpHook)     // OnStop: stop accepting requests
+lc.Append(metricsHook)  // OnStop: flush metrics after HTTP drains
+lc.Append(dbHook)       // OnStop: close DB connections last
+// fx runs OnStop in reverse OnStart order automatically
+```
+
+For UCP (1 HTTP server): manual is sufficient — the ordering is obvious.
+fx lifecycle becomes genuinely useful at 3+ components with non-trivial shutdown
+dependencies. wire never helps here — lifecycle is always manual regardless of wire.
+
+**Key distinction:** wire = DI wiring only. fx = DI wiring + lifecycle management.
+If you need structured lifecycle with wire, you write the signal handling yourself.
 
 ## Qualitative findings
 
