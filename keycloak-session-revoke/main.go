@@ -9,7 +9,7 @@
 // Usage:
 //
 //	KEYCLOAK_ISSUER=https://qa2-accounts-onecloud.rakuten-it.com/auth/realms/roc \
-//	KEYCLOAK_CLIENT_ID=<client-id> \
+//	KEYCLOAK_CLIENT_ID=<client-id> \ qa is -> rns:roc:portal
 //	go run .
 package main
 
@@ -39,6 +39,7 @@ func main() {
 
 	flowLogout(issuer, clientID)
 	flowRevoke(issuer, clientID)
+	flowOfflineLogout(issuer, clientID)
 }
 
 func flowLogout(issuer, clientID string) {
@@ -53,7 +54,8 @@ func flowLogout(issuer, clientID string) {
 	}
 	fmt.Printf("access_token:  %s...\n", tokens.AccessToken[:min(20, len(tokens.AccessToken))])
 	fmt.Printf("refresh_token: %s...\n", tokens.RefreshToken[:min(20, len(tokens.RefreshToken))])
-	printTokenTTL(tokens.AccessToken)
+	printTokenTTL("access_token", tokens.AccessToken)
+	printTokenTTL("refresh_token", tokens.RefreshToken)
 
 	fmt.Println("\n--- Step 2: POST /logout with refresh_token ---")
 	status, body, err := postRevoke(
@@ -81,7 +83,8 @@ func flowRevoke(issuer, clientID string) {
 	}
 	fmt.Printf("access_token:  %s...\n", tokens.AccessToken[:min(20, len(tokens.AccessToken))])
 	fmt.Printf("refresh_token: %s...\n", tokens.RefreshToken[:min(20, len(tokens.RefreshToken))])
-	printTokenTTL(tokens.AccessToken)
+	printTokenTTL("access_token", tokens.AccessToken)
+	printTokenTTL("refresh_token", tokens.RefreshToken)
 
 	fmt.Println("\n--- Step 2: POST /revoke with refresh_token ---")
 	status, body, err := postRevoke(
@@ -94,6 +97,35 @@ func flowRevoke(issuer, clientID string) {
 	fmt.Printf("status: %d\nbody:   %s\n", status, strings.TrimSpace(body))
 
 	fmt.Println("\n--- Step 3: Verify — attempt refresh with revoked token ---")
+	printVerifyResult(tryRefresh(issuer, clientID, tokens.RefreshToken))
+}
+
+func flowOfflineLogout(issuer, clientID string) {
+	fmt.Println("\n========================================")
+	fmt.Println("Flow C: offline_access token + /logout")
+	fmt.Println("========================================")
+
+	fmt.Println("\n--- Step 1: Login (PKCE + offline_access scope) ---")
+	tokens, err := loginWithScope(issuer, clientID, "openid email profile offline_access")
+	if err != nil {
+		fatalf("login failed: %v", err)
+	}
+	fmt.Printf("access_token:  %s...\n", tokens.AccessToken[:min(20, len(tokens.AccessToken))])
+	fmt.Printf("refresh_token: %s...\n", tokens.RefreshToken[:min(20, len(tokens.RefreshToken))])
+	printTokenTTL("access_token", tokens.AccessToken)
+	printTokenTTL("refresh_token", tokens.RefreshToken)
+
+	fmt.Println("\n--- Step 2: POST /logout with offline refresh_token ---")
+	status, body, err := postRevoke(
+		strings.TrimSuffix(issuer, "/")+"/protocol/openid-connect/logout",
+		url.Values{"client_id": {clientID}, "refresh_token": {tokens.RefreshToken}},
+	)
+	if err != nil {
+		fatalf("logout request failed: %v", err)
+	}
+	fmt.Printf("status: %d\nbody:   %s\n", status, strings.TrimSpace(body))
+
+	fmt.Println("\n--- Step 3: Verify — attempt refresh with revoked offline token ---")
 	printVerifyResult(tryRefresh(issuer, clientID, tokens.RefreshToken))
 }
 
@@ -121,13 +153,17 @@ type tokenResponse struct {
 }
 
 func login(issuer, clientID string) (*tokenResponse, error) {
+	return loginWithScope(issuer, clientID, "openid email profile")
+}
+
+func loginWithScope(issuer, clientID, scope string) (*tokenResponse, error) {
 	verifier, challenge, err := pkce()
 	if err != nil {
 		return nil, fmt.Errorf("generate pkce: %w", err)
 	}
 
 	redirectURI := fmt.Sprintf("http://localhost:%d/callback", callbackPort)
-	authURL := buildAuthURL(issuer, clientID, redirectURI, challenge)
+	authURL := buildAuthURLWithScope(issuer, clientID, redirectURI, challenge, scope)
 
 	codeCh := make(chan string, 1)
 	errCh := make(chan error, 1)
@@ -213,15 +249,15 @@ func tryRefresh(issuer, clientID, refreshToken string) (int, string, error) {
 // --- Token TTL ---
 
 // printTokenTTL decodes the JWT payload and prints iat, exp, and TTL.
-func printTokenTTL(tokenStr string) {
+func printTokenTTL(label, tokenStr string) {
 	parts := strings.Split(tokenStr, ".")
 	if len(parts) != 3 {
-		fmt.Println("access_token TTL: (could not parse JWT)")
+		fmt.Printf("%s TTL: (could not parse JWT)\n", label)
 		return
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		fmt.Printf("access_token TTL: (base64 decode error: %v)\n", err)
+		fmt.Printf("%s TTL: (base64 decode error: %v)\n", label, err)
 		return
 	}
 	var claims struct {
@@ -229,12 +265,12 @@ func printTokenTTL(tokenStr string) {
 		Exp int64 `json:"exp"`
 	}
 	if err := json.Unmarshal(payload, &claims); err != nil {
-		fmt.Printf("access_token TTL: (json parse error: %v)\n", err)
+		fmt.Printf("%s TTL: (json parse error: %v)\n", label, err)
 		return
 	}
 	ttl := time.Duration(claims.Exp-claims.Iat) * time.Second
 	exp := time.Unix(claims.Exp, 0)
-	fmt.Printf("access_token TTL: %s (expires at %s)\n", ttl, exp.Format(time.RFC3339))
+	fmt.Printf("%s TTL: %s (expires at %s)\n", label, ttl, exp.Format(time.RFC3339))
 }
 
 // --- Helpers ---
@@ -268,7 +304,7 @@ func pkce() (verifier, challenge string, err error) {
 	return
 }
 
-func buildAuthURL(issuer, clientID, redirectURI, challenge string) string {
+func buildAuthURLWithScope(issuer, clientID, redirectURI, challenge, scope string) string {
 	base := strings.TrimSuffix(issuer, "/") + "/protocol/openid-connect/auth"
 	q := url.Values{
 		"response_type":         {"code"},
@@ -276,7 +312,7 @@ func buildAuthURL(issuer, clientID, redirectURI, challenge string) string {
 		"redirect_uri":          {redirectURI},
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
-		"scope":                 {"openid email profile"},
+		"scope":                 {scope},
 	}
 	return base + "?" + q.Encode()
 }
