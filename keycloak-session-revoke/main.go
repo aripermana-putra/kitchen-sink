@@ -37,9 +37,75 @@ func main() {
 	issuer := requireEnv("KEYCLOAK_ISSUER")
 	clientID := requireEnv("KEYCLOAK_CLIENT_ID")
 
-	flowLogout(issuer, clientID)
-	flowRevoke(issuer, clientID)
-	flowOfflineLogout(issuer, clientID)
+	flowAuthTimeSidStability(issuer, clientID)
+}
+
+// flowAuthTimeSidStability verifies that auth_time and sid are stable across a token refresh.
+func flowAuthTimeSidStability(issuer, clientID string) {
+	fmt.Println("\n========================================")
+	fmt.Println("Flow: auth_time + sid stability across refresh")
+	fmt.Println("========================================")
+
+	fmt.Println("\n--- Step 1: Login (PKCE) ---")
+	tokens, err := login(issuer, clientID)
+	if err != nil {
+		fatalf("login failed: %v", err)
+	}
+	fmt.Println("Original access_token claims:")
+	printAuthClaims(tokens.AccessToken)
+
+	fmt.Println("\n--- Step 2: Refresh the access token ---")
+	endpoint := strings.TrimSuffix(issuer, "/") + "/protocol/openid-connect/token"
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {tokens.RefreshToken},
+		"client_id":     {clientID},
+	}
+	refreshed, err := postForm(endpoint, form)
+	if err != nil {
+		fatalf("refresh failed: %v", err)
+	}
+	fmt.Println("Refreshed access_token claims:")
+	printAuthClaims(refreshed.AccessToken)
+
+	fmt.Println("\n--- Verdict ---")
+	orig := parseAuthClaims(tokens.AccessToken)
+	ref := parseAuthClaims(refreshed.AccessToken)
+	if orig.AuthTime != 0 && orig.AuthTime == ref.AuthTime {
+		fmt.Println("auth_time: STABLE across refresh ✓")
+	} else {
+		fmt.Printf("auth_time: CHANGED — original=%d refreshed=%d\n", orig.AuthTime, ref.AuthTime)
+	}
+	if orig.Sid != "" && orig.Sid == ref.Sid {
+		fmt.Println("sid:       STABLE across refresh ✓")
+	} else {
+		fmt.Printf("sid:       CHANGED — original=%q refreshed=%q\n", orig.Sid, ref.Sid)
+	}
+	if orig.Iat != ref.Iat {
+		fmt.Println("iat:       CHANGED (expected — new token issued) ✓")
+	} else {
+		fmt.Println("iat:       UNCHANGED (unexpected)")
+	}
+}
+
+type authClaims struct {
+	Iat      int64  `json:"iat"`
+	AuthTime int64  `json:"auth_time"`
+	Sid      string `json:"sid"`
+}
+
+func parseAuthClaims(tokenStr string) authClaims {
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) != 3 {
+		return authClaims{}
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return authClaims{}
+	}
+	var c authClaims
+	_ = json.Unmarshal(payload, &c)
+	return c
 }
 
 func flowLogout(issuer, clientID string) {
@@ -56,6 +122,8 @@ func flowLogout(issuer, clientID string) {
 	fmt.Printf("refresh_token: %s...\n", tokens.RefreshToken[:min(20, len(tokens.RefreshToken))])
 	printTokenTTL("access_token", tokens.AccessToken)
 	printTokenTTL("refresh_token", tokens.RefreshToken)
+	fmt.Println("access_token claims:")
+	printAuthClaims(tokens.AccessToken)
 
 	fmt.Println("\n--- Step 2: POST /logout with refresh_token ---")
 	status, body, err := postRevoke(
@@ -85,6 +153,8 @@ func flowRevoke(issuer, clientID string) {
 	fmt.Printf("refresh_token: %s...\n", tokens.RefreshToken[:min(20, len(tokens.RefreshToken))])
 	printTokenTTL("access_token", tokens.AccessToken)
 	printTokenTTL("refresh_token", tokens.RefreshToken)
+	fmt.Println("access_token claims:")
+	printAuthClaims(tokens.AccessToken)
 
 	fmt.Println("\n--- Step 2: POST /revoke with refresh_token ---")
 	status, body, err := postRevoke(
@@ -271,6 +341,46 @@ func printTokenTTL(label, tokenStr string) {
 	ttl := time.Duration(claims.Exp-claims.Iat) * time.Second
 	exp := time.Unix(claims.Exp, 0)
 	fmt.Printf("%s TTL: %s (expires at %s)\n", label, ttl, exp.Format(time.RFC3339))
+}
+
+// printAuthClaims decodes the access token JWT and prints auth_time and session_state.
+func printAuthClaims(tokenStr string) {
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) != 3 {
+		fmt.Println("auth claims: (could not parse JWT)")
+		return
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		fmt.Printf("auth claims: (base64 decode error: %v)\n", err)
+		return
+	}
+	var claims struct {
+		Iat          int64  `json:"iat"`
+		AuthTime     int64  `json:"auth_time"`
+		SessionState string `json:"session_state"`
+		Sid          string `json:"sid"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		fmt.Printf("auth claims: (json parse error: %v)\n", err)
+		return
+	}
+	fmt.Printf("  iat:           %s\n", time.Unix(claims.Iat, 0).Format(time.RFC3339))
+	if claims.AuthTime != 0 {
+		fmt.Printf("  auth_time:     %s\n", time.Unix(claims.AuthTime, 0).Format(time.RFC3339))
+	} else {
+		fmt.Println("  auth_time:     (not present)")
+	}
+	if claims.SessionState != "" {
+		fmt.Printf("  session_state: %s\n", claims.SessionState)
+	} else {
+		fmt.Println("  session_state: (not present)")
+	}
+	if claims.Sid != "" {
+		fmt.Printf("  sid:           %s\n", claims.Sid)
+	} else {
+		fmt.Println("  sid:           (not present)")
+	}
 }
 
 // --- Helpers ---
