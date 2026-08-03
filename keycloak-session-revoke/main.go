@@ -36,8 +36,184 @@ const callbackPort = 18080
 func main() {
 	issuer := requireEnv("KEYCLOAK_ISSUER")
 	clientID := requireEnv("KEYCLOAK_CLIENT_ID")
+	horizonBase := requireEnv("HORIZON_BASE_URL")
 
-	flowAuthTimeSidStability(issuer, clientID)
+	flowUCPSubscriptionDiscovery(issuer, clientID, horizonBase)
+}
+
+// flowUCPSubscriptionDiscovery tests whether Horizon Core Data can serve as the source
+// of truth for UCP service subscription status, removing the need for ucp_registered_tenants.
+//
+// Since UCP is not yet subscribed in any test tenant, DBaaS is used as a proxy:
+// clsd-ucp is subscribed to DBaaS, but the test user has no DBaaS role.
+// This mirrors the target scenario: tenant subscribed to UCP, user has no UCP role.
+func flowUCPSubscriptionDiscovery(issuer, clientID, horizonBase string) {
+	fmt.Println("\n========================================")
+	fmt.Println("Flow: UCP subscription discovery via Core Data")
+	fmt.Println("========================================")
+
+	fmt.Println("\n--- Step 1: Login (PKCE) ---")
+	tokens, err := login(issuer, clientID)
+	if err != nil {
+		fatalf("login failed: %v", err)
+	}
+
+	// Parse JWT groups and email
+	jwtGroups, email := parseGroupsAndEmail(tokens.AccessToken)
+	fmt.Printf("Logged in as: %s\n", email)
+	fmt.Printf("JWT groups (%d entries):\n", len(jwtGroups))
+	for _, g := range jwtGroups {
+		fmt.Printf("  %s\n", g)
+	}
+
+	fmt.Println("\n--- Step 2: Check JWT for dbaas entries (proxy for UCP) ---")
+	dbaasInJWT := false
+	for _, g := range jwtGroups {
+		if strings.Contains(g, ":dbaas:") {
+			fmt.Printf("  FOUND in JWT: %s\n", g)
+			dbaasInJWT = true
+		}
+	}
+	if !dbaasInJWT {
+		fmt.Println("  SC-2 PASS — dbaas absent from JWT groups (user has no DBaaS role) ✓")
+	} else {
+		fmt.Println("  SC-2 FAIL — dbaas present in JWT groups (user still has a DBaaS role)")
+	}
+
+	fmt.Println("\n--- Step 3: Check JWT for iam entry (tenant membership) ---")
+	for _, g := range jwtGroups {
+		if strings.Contains(g, ":iam:") {
+			fmt.Printf("  SC-3 PASS — iam entry: %s ✓\n", g)
+		}
+	}
+
+	fmt.Println("\n--- Step 4: Call Horizon Core Data for tenant subscriptions ---")
+	// Use RNS format: rns:roc:iam:::users:{username} (derived from email prefix)
+	username := strings.Split(email, "@")[0]
+	memberRNS := "rns:roc:iam:::users:" + username
+	endpoint := strings.TrimSuffix(horizonBase, "/") + "/v0/members/" + url.PathEscape(memberRNS) + "/tenants?subscriptions=true"
+	fmt.Printf("  GET %s\n", endpoint)
+
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		fatalf("build request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fatalf("horizon request failed: %v\n\nNote: ensure you are on Rakuten VPN / internal network.", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != 200 {
+		fmt.Printf("  Horizon returned %d: %s\n", resp.StatusCode, strings.TrimSpace(string(body)))
+		return
+	}
+
+	var horizonResp struct {
+		TotalItems int `json:"total_items"`
+		Items      []struct {
+			Name          string `json:"name"`
+			RNS           string `json:"rns"`
+			Subscriptions []struct {
+				Name string `json:"name"`
+				RNS  string `json:"rns"`
+			} `json:"subscriptions"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &horizonResp); err != nil {
+		fatalf("parse horizon response: %v", err)
+	}
+
+	fmt.Printf("  Horizon returned %d tenant(s)\n", horizonResp.TotalItems)
+	for _, tenant := range horizonResp.Items {
+		fmt.Printf("\n  Tenant: %s (%s)\n", tenant.Name, tenant.RNS)
+		fmt.Printf("  Subscriptions (%d):\n", len(tenant.Subscriptions))
+
+		dbaasInSubscriptions := false
+		ucpInSubscriptions := false
+		for _, sub := range tenant.Subscriptions {
+			fmt.Printf("    - %s\n", sub.Name)
+			if sub.Name == "dbaas" {
+				dbaasInSubscriptions = true
+			}
+			if sub.Name == "ucp" {
+				ucpInSubscriptions = true
+			}
+		}
+
+		fmt.Println()
+		if dbaasInSubscriptions {
+			fmt.Println("  SC-1 PASS — dbaas in subscriptions (tenant is subscribed) ✓")
+		} else {
+			fmt.Println("  SC-1 FAIL — dbaas not in subscriptions")
+		}
+		if ucpInSubscriptions {
+			fmt.Println("  UCP — present in subscriptions ✓")
+		} else {
+			fmt.Println("  UCP — not yet subscribed in this tenant")
+		}
+	}
+
+	fmt.Println("\n--- Verdict ---")
+	if !dbaasInJWT {
+		fmt.Println("Decoupling confirmed: subscription status (Horizon) is independent of user role (JWT groups).")
+		fmt.Println("A service can be subscribed in a tenant while the user has no role in it.")
+		fmt.Println("→ ucp tenants list must call Horizon to get subscription status.")
+		fmt.Println("→ ucp_registered_tenants table is not needed.")
+	}
+}
+
+// flowGroupsClaim logs in and prints the full groups claim from the access token.
+// Used to verify what happens when a user has no role in a subscribed service (e.g. dbaas).
+func flowGroupsClaim(issuer, clientID string) {
+	fmt.Println("\n========================================")
+	fmt.Println("Flow: inspect groups claim")
+	fmt.Println("========================================")
+
+	fmt.Println("\n--- Step 1: Login (PKCE) ---")
+	tokens, err := login(issuer, clientID)
+	if err != nil {
+		fatalf("login failed: %v", err)
+	}
+
+	parts := strings.Split(tokens.AccessToken, ".")
+	if len(parts) != 3 {
+		fatalf("invalid JWT")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		fatalf("base64 decode: %v", err)
+	}
+
+	var claims struct {
+		Sub    string   `json:"sub"`
+		Email  string   `json:"email"`
+		Groups []string `json:"groups"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		fatalf("json parse: %v", err)
+	}
+
+	fmt.Printf("\nUser: %s (%s)\n", claims.Email, claims.Sub)
+	fmt.Printf("\ngroups claim (%d entries):\n", len(claims.Groups))
+	for _, g := range claims.Groups {
+		fmt.Printf("  %s\n", g)
+	}
+
+	fmt.Println("\n--- Checking dbaas entries ---")
+	found := false
+	for _, g := range claims.Groups {
+		if strings.Contains(g, ":dbaas:") {
+			fmt.Printf("  FOUND: %s\n", g)
+			found = true
+		}
+	}
+	if !found {
+		fmt.Println("  dbaas: (no entries — service is subscribed but user has no role assigned)")
+	}
 }
 
 // flowAuthTimeSidStability verifies that auth_time and sid are stable across a token refresh.
@@ -92,6 +268,23 @@ type authClaims struct {
 	Iat      int64  `json:"iat"`
 	AuthTime int64  `json:"auth_time"`
 	Sid      string `json:"sid"`
+}
+
+func parseGroupsAndEmail(tokenStr string) ([]string, string) {
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) != 3 {
+		return nil, ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, ""
+	}
+	var c struct {
+		Email  string   `json:"email"`
+		Groups []string `json:"groups"`
+	}
+	_ = json.Unmarshal(payload, &c)
+	return c.Groups, c.Email
 }
 
 func parseAuthClaims(tokenStr string) authClaims {
