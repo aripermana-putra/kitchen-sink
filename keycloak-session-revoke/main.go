@@ -66,18 +66,18 @@ func flowUCPSubscriptionDiscovery(issuer, clientID, horizonBase string) {
 		fmt.Printf("  %s\n", g)
 	}
 
-	fmt.Println("\n--- Step 2: Check JWT for dbaas entries (proxy for UCP) ---")
-	dbaasInJWT := false
+	fmt.Println("\n--- Step 2: Check JWT for ucp entries ---")
+	ucpInJWT := false
 	for _, g := range jwtGroups {
-		if strings.Contains(g, ":dbaas:") {
+		if strings.Contains(g, ":ucp:") {
 			fmt.Printf("  FOUND in JWT: %s\n", g)
-			dbaasInJWT = true
+			ucpInJWT = true
 		}
 	}
-	if !dbaasInJWT {
-		fmt.Println("  SC-2 PASS — dbaas absent from JWT groups (user has no DBaaS role) ✓")
+	if !ucpInJWT {
+		fmt.Println("  UCP: absent from JWT groups (user has no UCP role assigned) ✓")
 	} else {
-		fmt.Println("  SC-2 FAIL — dbaas present in JWT groups (user still has a DBaaS role)")
+		fmt.Println("  UCP entries found in JWT groups — see above")
 	}
 
 	fmt.Println("\n--- Step 3: Check JWT for iam entry (tenant membership) ---")
@@ -132,37 +132,26 @@ func flowUCPSubscriptionDiscovery(issuer, clientID, horizonBase string) {
 		fmt.Printf("\n  Tenant: %s (%s)\n", tenant.Name, tenant.RNS)
 		fmt.Printf("  Subscriptions (%d):\n", len(tenant.Subscriptions))
 
-		dbaasInSubscriptions := false
 		ucpInSubscriptions := false
 		for _, sub := range tenant.Subscriptions {
 			fmt.Printf("    - %s\n", sub.Name)
-			if sub.Name == "dbaas" {
-				dbaasInSubscriptions = true
-			}
 			if sub.Name == "ucp" {
 				ucpInSubscriptions = true
 			}
 		}
 
 		fmt.Println()
-		if dbaasInSubscriptions {
-			fmt.Println("  SC-1 PASS — dbaas in subscriptions (tenant is subscribed) ✓")
-		} else {
-			fmt.Println("  SC-1 FAIL — dbaas not in subscriptions")
-		}
 		if ucpInSubscriptions {
-			fmt.Println("  UCP — present in subscriptions ✓")
+			fmt.Println("  SC-1 PASS — ucp in subscriptions ✓")
 		} else {
-			fmt.Println("  UCP — not yet subscribed in this tenant")
+			fmt.Println("  SC-1 FAIL — ucp not in subscriptions")
 		}
 	}
 
 	fmt.Println("\n--- Verdict ---")
-	if !dbaasInJWT {
-		fmt.Println("Decoupling confirmed: subscription status (Horizon) is independent of user role (JWT groups).")
-		fmt.Println("A service can be subscribed in a tenant while the user has no role in it.")
-		fmt.Println("→ ucp tenants list must call Horizon to get subscription status.")
-		fmt.Println("→ ucp_registered_tenants table is not needed.")
+	if !ucpInJWT {
+		fmt.Println("UCP role absent from JWT — user has no UCP role assigned in this tenant.")
+		fmt.Println("Subscription status must come from Horizon API, not JWT groups.")
 	}
 }
 
