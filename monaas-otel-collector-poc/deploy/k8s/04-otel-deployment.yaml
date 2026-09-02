@@ -65,6 +65,13 @@ spec:
               scrape_interval: 15s
               static_configs:
                 - targets: ["prometheus-example-app.default.svc.cluster.local:8080"]
+      googlecloudmonitoring:
+        collection_interval: 60s
+        project_id: sub-gcp-ucp-clsd-sandbox
+        metrics_list:
+          - metric_name: "cloudsql.googleapis.com/database/cpu/utilization"
+          - metric_name: "cloudsql.googleapis.com/database/memory/utilization"
+          - metric_name: "cloudsql.googleapis.com/database/disk/utilization"
     processors:
       batch: {}
     exporters:
@@ -73,6 +80,6 @@ spec:
     service:
       pipelines:
         metrics:
-          receivers: [k8s_cluster, prometheus]
+          receivers: [k8s_cluster, prometheus, googlecloudmonitoring]
           processors: [batch]
           exporters: [prometheus_remote_write]
