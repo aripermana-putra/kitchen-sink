@@ -1,0 +1,13 @@
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: sample-app
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: prometheus-example-app
+  endpoints:
+    - port: http
+      interval: 30s
+      path: /metrics
