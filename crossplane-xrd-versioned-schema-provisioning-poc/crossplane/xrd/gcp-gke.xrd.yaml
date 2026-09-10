@@ -1,0 +1,171 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xgcpgkeclusters.gcp-gke.catalog.ucp.io
+  labels:
+    catalog.ucp.io/enabled: "true"
+  annotations:
+    catalog.ucp.io/service-id: gcp-gke
+    catalog.ucp.io/name: GKE Cluster
+    catalog.ucp.io/provider: GCP
+    catalog.ucp.io/category: compute
+    catalog.ucp.io/description: Managed Kubernetes cluster on GCP GKE
+    catalog.ucp.io/roc-subscription-name: ""
+    catalog.ucp.io/resource-graph: '[{"name":"cluster","type":"Cluster"},{"name":"nodepool","type":"NodePool","dependsOn":["cluster"]},{"name":"conn-secret","type":"ConnectionSecret","dependsOn":["cluster"]}]'
+    catalog.ucp.io/supported-regions: "us-central1,asia-northeast1,europe-west1"
+spec:
+  group: gcp-gke.catalog.ucp.io
+  names:
+    kind: XGCPGKECluster
+    plural: xgcpgkeclusters
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: false
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    shared:
+                      type: object
+                      required: [projectId]
+                      properties:
+                        projectId:
+                          type: string
+                          description: GCP project ID
+                          example: "coupon-prod-gcp"
+                        location:
+                          type: string
+                          default: us-central1
+                          description: Region/zone for cluster and node pool
+                          example: "us-central1"
+                    cluster:
+                      type: object
+                      properties:
+                        releaseChannel:
+                          type: string
+                          default: REGULAR
+                          description: REGULAR | RAPID | STABLE
+                          example: "REGULAR"
+                    nodepool:
+                      type: object
+                      properties:
+                        nodeCount:
+                          type: integer
+                          default: 1
+                          description: Initial node count
+                          example: 3
+              required:
+                - parameters
+    - name: v1beta1
+      served: true
+      referenceable: false
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    shared:
+                      type: object
+                      required: [projectId]
+                      properties:
+                        projectId:
+                          type: string
+                          description: GCP project ID
+                          example: "coupon-prod-gcp"
+                        location:
+                          type: string
+                          default: us-central1
+                          description: Region/zone for cluster and node pool
+                          example: "us-central1"
+                    cluster:
+                      type: object
+                      properties:
+                        releaseChannel:
+                          type: string
+                          default: REGULAR
+                          description: REGULAR | RAPID | STABLE
+                          example: "REGULAR"
+                        network:
+                          type: string
+                          description: VPC network name
+                        subnetwork:
+                          type: string
+                          description: Subnetwork name
+                    nodepool:
+                      type: object
+                      properties:
+                        nodeCount:
+                          type: integer
+                          default: 1
+                          description: Initial node count
+                          example: 3
+              required:
+                - parameters
+    - name: v1gamma1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    shared:
+                      type: object
+                      required: [projectId]
+                      properties:
+                        projectId:
+                          type: string
+                          description: GCP project ID
+                          example: "coupon-prod-gcp"
+                        location:
+                          type: string
+                          default: us-central1
+                          description: Region/zone for cluster and node pool
+                          example: "us-central1"
+                    cluster:
+                      type: object
+                      properties:
+                        releaseChannel:
+                          type: string
+                          default: REGULAR
+                          description: REGULAR | RAPID | STABLE
+                          example: "REGULAR"
+                        network:
+                          type: string
+                          description: VPC network name
+                        subnetwork:
+                          type: string
+                          description: Subnetwork name
+                    nodepool:
+                      type: object
+                      properties:
+                        nodeCount:
+                          type: integer
+                          default: 1
+                          description: Initial node count
+                          example: 3
+                        maxNodeCount:
+                          type: integer
+                          default: 5
+                          description: Maximum node count for autoscaling
+                          example: 10
+              required:
+                - parameters

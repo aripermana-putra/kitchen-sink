@@ -1,0 +1,63 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xgcpcloudsqlinstances.gcp-cloud-sql.catalog.ucp.io
+  labels:
+    catalog.ucp.io/enabled: "true"
+  annotations:
+    catalog.ucp.io/service-id: gcp-cloud-sql
+    catalog.ucp.io/name: Cloud SQL Instance
+    catalog.ucp.io/provider: GCP
+    catalog.ucp.io/category: database
+    catalog.ucp.io/description: Managed relational database on GCP Cloud SQL
+    catalog.ucp.io/roc-subscription-name: ""
+    catalog.ucp.io/resource-graph: '[{"name":"instance","type":"Instance"},{"name":"conn-secret","type":"ConnectionSecret","dependsOn":["instance"]}]'
+    catalog.ucp.io/supported-regions: "us-central1,asia-northeast1"
+spec:
+  group: gcp-cloud-sql.catalog.ucp.io
+  names:
+    kind: XGCPCloudSQLInstance
+    plural: xgcpcloudsqlinstances
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    shared:
+                      type: object
+                      required: [projectId]
+                      properties:
+                        projectId:
+                          type: string
+                          description: GCP project ID
+                          example: "coupon-prod-gcp"
+                        location:
+                          type: string
+                          default: us-central1
+                          description: Region for the database instance
+                          example: "us-central1"
+                    instance:
+                      type: object
+                      properties:
+                        databaseVersion:
+                          type: string
+                          default: POSTGRES_15
+                          description: POSTGRES_15 | MYSQL_8_0
+                          example: "POSTGRES_15"
+                        tier:
+                          type: string
+                          default: db-f1-micro
+                          description: Machine tier for the instance
+                          example: "db-f1-micro"
+              required:
+                - parameters
