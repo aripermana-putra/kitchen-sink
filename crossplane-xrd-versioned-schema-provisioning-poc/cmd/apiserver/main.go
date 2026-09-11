@@ -44,26 +44,7 @@ func main() {
 
 	go catalog.Poller(ctx, cache, client, pollTimeout, pollInterval)
 
-	// xrTargets is the PoC's static registry of which XR kind/group/resource
-	// each catalog entry's provision endpoint applies to. A real
-	// implementation would derive this from the XRD's own spec.names, same
-	// LIST call as everything else — left static here since this PoC's
-	// scope is schema derivation and validate-then-apply, not XR-target
-	// derivation.
-	xrTargets := map[string]httpapi.XRTarget{
-		"gcp-gke": {
-			Group:    "gcp-gke.catalog.ucp.io",
-			Kind:     "XGCPGKECluster",
-			Resource: "xgcpgkeclusters",
-		},
-		"gcp-cloud-sql": {
-			Group:    "gcp-cloud-sql.catalog.ucp.io",
-			Kind:     "XGCPCloudSQLInstance",
-			Resource: "xgcpcloudsqlinstances",
-		},
-	}
-
-	server := httpapi.NewServer(cache, dyn, xrTargets)
+	server := httpapi.NewServer(cache, dyn)
 	mux := http.NewServeMux()
 	server.Routes(mux)
 

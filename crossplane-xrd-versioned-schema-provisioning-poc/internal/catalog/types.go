@@ -30,4 +30,11 @@ type EntrySchema struct {
 	// Crossplane v2 XRD this is driven by referenceable: true, not a literal
 	// "storage" field on the XRD version entry itself.
 	StorageVersion string
+	// Group, Kind, and Resource are copied verbatim from the same XRD's
+	// spec.group, spec.names.kind, and spec.names.plural — the
+	// GroupVersionResource triple needed to construct and apply an XR of
+	// this type. Derived from the XRD itself, not maintained separately.
+	Group    string
+	Kind     string
+	Resource string
 }

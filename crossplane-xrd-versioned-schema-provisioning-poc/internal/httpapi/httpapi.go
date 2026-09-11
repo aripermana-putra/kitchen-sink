@@ -16,24 +16,13 @@ import (
 	"github.com/aripermana-putra/kitchen-sink/crossplane-xrd-versioned-schema-provisioning-poc/internal/validate"
 )
 
-// XRTarget names the exact XR kind/group/resource a catalog entry's
-// provision endpoint applies, since these aren't derivable from the catalog
-// annotations alone (Kind capitalization isn't a mechanical transform of the
-// plural resource name).
-type XRTarget struct {
-	Group    string
-	Kind     string
-	Resource string // plural, lowercase
-}
-
 type Server struct {
-	cache     *catalog.Cache
-	dyn       dynamic.Interface
-	xrTargets map[string]XRTarget
+	cache *catalog.Cache
+	dyn   dynamic.Interface
 }
 
-func NewServer(cache *catalog.Cache, dyn dynamic.Interface, xrTargets map[string]XRTarget) *Server {
-	return &Server{cache: cache, dyn: dyn, xrTargets: xrTargets}
+func NewServer(cache *catalog.Cache, dyn dynamic.Interface) *Server {
+	return &Server{cache: cache, dyn: dyn}
 }
 
 func (s *Server) Routes(mux *http.ServeMux) {
@@ -83,25 +72,55 @@ func (s *Server) handleTemplate(w http.ResponseWriter, r *http.Request) {
 	params := es.Versions[es.StorageVersion]
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "# schemaVersion (fixed) — schema version this template was generated against; leave as-is\n")
+	fmt.Fprintf(&b, "# schemaVersion (fixed) — XRD version this template was generated against; leave as-is\n")
 	fmt.Fprintf(&b, "schemaVersion: %s\n", es.StorageVersion)
-	fmt.Fprintf(&b, "# name (required) — resource name\n")
+	fmt.Fprintf(&b, "# name (required) — Resource name\n")
 	fmt.Fprintf(&b, "name: \"\"\n")
 
 	groups, _ := params["properties"].(map[string]any)
-	groupNames := make([]string, 0, len(groups))
-	for name := range groups {
-		groupNames = append(groupNames, name)
-	}
-	sort.Strings(groupNames)
 
-	for _, groupName := range groupNames {
+	// Group order matches MCUCP-145's worked --generate-template example:
+	// "shared" first (if present), then one per resource-graph item in graph
+	// order, then any remaining group name (not expected in practice) sorted
+	// alphabetically as a fallback.
+	ordered := make([]string, 0, len(groups))
+	seen := map[string]bool{}
+	if _, ok := groups["shared"]; ok {
+		ordered = append(ordered, "shared")
+		seen["shared"] = true
+	}
+	for _, node := range es.ResourceGraph {
+		if _, ok := groups[node.Name]; ok && !seen[node.Name] {
+			ordered = append(ordered, node.Name)
+			seen[node.Name] = true
+		}
+	}
+	var remaining []string
+	for name := range groups {
+		if !seen[name] {
+			remaining = append(remaining, name)
+		}
+	}
+	sort.Strings(remaining)
+	ordered = append(ordered, remaining...)
+
+	for _, groupName := range ordered {
 		group, _ := groups[groupName].(map[string]any)
 		props, _ := group["properties"].(map[string]any)
 		if len(props) == 0 {
 			continue
 		}
-		fmt.Fprintf(&b, "%s:\n", groupName)
+
+		required := map[string]bool{}
+		if reqList, ok := group["required"].([]any); ok {
+			for _, req := range reqList {
+				if name, ok := req.(string); ok {
+					required[name] = true
+				}
+			}
+		}
+
+		fmt.Fprintf(&b, "\n%s:\n", groupName)
 
 		propNames := make([]string, 0, len(props))
 		for name := range props {
@@ -113,14 +132,31 @@ func (s *Server) handleTemplate(w http.ResponseWriter, r *http.Request) {
 			prop, _ := props[propName].(map[string]any)
 			desc, _ := prop["description"].(string)
 			def := prop["default"]
+			example := prop["example"]
+
+			reqWord := "optional"
+			if required[propName] {
+				reqWord = "required"
+			}
+
+			line := fmt.Sprintf("  # %s (%s)", propName, reqWord)
 			if desc != "" {
-				fmt.Fprintf(&b, "  # %s\n", desc)
+				line += fmt.Sprintf(" — %s", desc)
 			}
 			if def != nil {
-				fmt.Fprintf(&b, "  %s: %v\n", propName, def)
-			} else {
-				fmt.Fprintf(&b, "  %s: \"\"\n", propName)
+				line += fmt.Sprintf(" (default: %v)", def)
 			}
+			fmt.Fprintf(&b, "%s\n", line)
+
+			if example != nil {
+				if s, ok := example.(string); ok {
+					fmt.Fprintf(&b, "  #   example: %q\n", s)
+				} else {
+					fmt.Fprintf(&b, "  #   example: %v\n", example)
+				}
+			}
+
+			fmt.Fprintf(&b, "  %s: \"\"\n", propName)
 		}
 	}
 
@@ -163,16 +199,10 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	target, ok := s.xrTargets[serviceID]
-	if !ok {
-		http.Error(w, fmt.Sprintf("no XR target registered for %q", serviceID), http.StatusInternalServerError)
-		return
-	}
-
 	xr := &unstructured.Unstructured{
 		Object: map[string]any{
-			"apiVersion": fmt.Sprintf("%s/%s", target.Group, req.SchemaVersion),
-			"kind":       target.Kind,
+			"apiVersion": fmt.Sprintf("%s/%s", es.Group, req.SchemaVersion),
+			"kind":       es.Kind,
 			"metadata": map[string]any{
 				"name":      req.Name,
 				"namespace": "default",
@@ -183,7 +213,7 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	gvr := schema.GroupVersionResource{Group: target.Group, Version: req.SchemaVersion, Resource: target.Resource}
+	gvr := schema.GroupVersionResource{Group: es.Group, Version: req.SchemaVersion, Resource: es.Resource}
 	created, err := s.dyn.Resource(gvr).Namespace("default").Create(r.Context(), xr, metav1.CreateOptions{})
 	if err != nil {
 		http.Error(w, fmt.Sprintf("apply failed: %v", err), http.StatusInternalServerError)

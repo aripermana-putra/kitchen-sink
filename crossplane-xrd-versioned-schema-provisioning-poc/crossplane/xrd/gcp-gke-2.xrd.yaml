@@ -1,23 +1,23 @@
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
-  name: xgcpgkeclusters.gcp-gke.catalog.ucp.io
+  name: xgcpgkeclusters2.gcp-gke.catalog.ucp.io
   labels:
     catalog.ucp.io/enabled: "true"
   annotations:
-    catalog.ucp.io/service-id: gcp-gke
-    catalog.ucp.io/name: GKE Cluster
+    catalog.ucp.io/service-id: gcp-gke-2
+    catalog.ucp.io/name: GKE Cluster 2
     catalog.ucp.io/provider: GCP
     catalog.ucp.io/category: compute
-    catalog.ucp.io/description: Managed Kubernetes cluster on GCP GKE
+    catalog.ucp.io/description: Managed Kubernetes cluster on GCP GKE 2
     catalog.ucp.io/roc-subscription-name: ""
     catalog.ucp.io/resource-graph: '[{"name":"cluster","type":"Cluster"},{"name":"nodepool","type":"NodePool","dependsOn":["cluster"]},{"name":"conn-secret","type":"ConnectionSecret","dependsOn":["cluster"]}]'
     catalog.ucp.io/supported-regions: "us-central1,asia-northeast1,europe-west1"
 spec:
   group: gcp-gke.catalog.ucp.io
   names:
-    kind: XGCPGKECluster
-    plural: xgcpgkeclusters
+    kind: XGCPGKECluster2
+    plural: xgcpgkeclusters2
   scope: Namespaced
   versions:
     - name: v1alpha1

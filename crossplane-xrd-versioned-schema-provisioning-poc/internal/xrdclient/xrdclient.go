@@ -17,7 +17,7 @@ import (
 
 var xrdGVR = schema.GroupVersionResource{
 	Group:    "apiextensions.crossplane.io",
-	Version:  "v1",
+	Version:  "v2",
 	Resource: "compositeresourcedefinitions",
 }
 
@@ -102,10 +102,20 @@ func deriveEntrySchema(obj *unstructured.Unstructured, serviceID string) (catalo
 		return catalog.EntrySchema{}, false
 	}
 
+	group, _, _ := unstructured.NestedString(obj.Object, "spec", "group")
+	kind, _, _ := unstructured.NestedString(obj.Object, "spec", "names", "kind")
+	resource, _, _ := unstructured.NestedString(obj.Object, "spec", "names", "plural")
+	if group == "" || kind == "" || resource == "" {
+		return catalog.EntrySchema{}, false
+	}
+
 	es := catalog.EntrySchema{
 		ServiceID:     serviceID,
 		ResourceGraph: graph,
 		Versions:      map[string]map[string]any{},
+		Group:         group,
+		Kind:          kind,
+		Resource:      resource,
 	}
 
 	for _, v := range versions {
