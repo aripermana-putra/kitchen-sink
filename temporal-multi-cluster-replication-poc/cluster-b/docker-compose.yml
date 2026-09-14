@@ -1,0 +1,32 @@
+services:
+  postgresql:
+    image: postgres:13
+    container_name: cluster-b-postgresql
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+    networks:
+      - cluster-b-net
+
+  temporal:
+    image: temporalio/auto-setup:1.25.2
+    container_name: cluster-b-temporal
+    depends_on:
+      - postgresql
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=postgresql
+      - DYNAMIC_CONFIG_FILE_PATH=/etc/temporal/config/dynamicconfig/docker.yaml
+    volumes:
+      - ./config_template.yaml:/etc/temporal/config/config_template.yaml
+    ports:
+      - "8233:7233"
+    networks:
+      - cluster-b-net
+
+networks:
+  cluster-b-net:
+    name: cluster-b-net
