@@ -1,0 +1,15 @@
+# OS
+.DS_Store
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+
+# Compiled binaries left at a PoC's root by `go build`
+keycloak-session-revoke/keycloak-session-revoke
+crossplane-xrd-versioned-schema-provisioning-poc/apiserver
