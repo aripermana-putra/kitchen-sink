@@ -51,17 +51,29 @@ func SlowActivity(ctx context.Context) (string, error) {
 	return result, nil
 }
 
+// newClient retries Dial instead of failing fast, so this process can be launched racing a
+// cluster's own restart/boot window (the whole point of the Phase 17 dispute test) without
+// dying on the first connection-refused before the target frontend is even listening.
 func newClient() client.Client {
 	addr := os.Getenv("TEMPORAL_ADDRESS")
 	ns := os.Getenv("TEMPORAL_NAMESPACE")
 	if addr == "" || ns == "" {
 		log.Fatalln("TEMPORAL_ADDRESS and TEMPORAL_NAMESPACE must both be set")
 	}
-	c, err := client.Dial(client.Options{HostPort: addr, Namespace: ns})
-	if err != nil {
-		log.Fatalln("unable to create client:", err)
+
+	deadline := time.Now().Add(2 * time.Minute)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		c, err := client.Dial(client.Options{HostPort: addr, Namespace: ns})
+		if err == nil {
+			return c
+		}
+		lastErr = err
+		log.Printf("client.Dial to %s failed (%v), retrying in 1s...\n", addr, err)
+		time.Sleep(1 * time.Second)
 	}
-	return c
+	log.Fatalln("unable to create client after retrying for 2m:", lastErr)
+	return nil
 }
 
 func runWorker() {
