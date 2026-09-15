@@ -9,8 +9,10 @@ scenario for team reference — adding a second cluster to an already-populated 
 deployment and backfilling its pre-existing history with `force-replication`. The final
 section introduces the PoC's first real worker to test whether Cluster A tries to resume a
 workflow Cluster B already finished while A was down — confirmed B genuinely completes what A
-started; the actual dispute race remains unreproduced, for a documented worker-code reason,
-not a Temporal one.
+started, and, once the worker was fixed to retry its connection instead of failing fast, the
+actual version-conflict dispute was forced and observed: two workers briefly believed they
+owned the same activity attempt, Cluster A's was cleanly rejected, and both clusters converged
+to one consistent result.
 
 Full narrative and results: see the UCP docs repo,
 `docs/projects/universal-control-plane-ucp/pocs/temporal-multi-cluster-replication/`
@@ -410,17 +412,19 @@ conflict-resolution mechanism (highest failover version wins) described in the r
 This is timing-dependent — if it doesn't reproduce on the first attempt, that's a finding to
 record, not something to force by retrying indefinitely.
 
-**Known result from testing this once:** the dispute did not reproduce, because `worker-a`'s
-`newClient()` calls a bare `client.Dial()` with no retry, then `log.Fatalln` on any error. When
-raced against `docker compose start cluster-a`, cluster-a's frontend wasn't accepting
-connections yet — `Dial` failed, and `worker-a` died before ever reaching its poll loop; it
-never attempted the race at all. Waiting for `operator cluster health` to report `SERVING`
-before launching `worker-a` misses the window from the other side — cluster-a's namespace
-belief converges to cluster-b (~10s, per Phase 10) before health-polling even confirms
-`SERVING`. **To actually force this race, `worker/main.go`'s `newClient()` needs
-retry-on-connect logic (or use `client.NewLazyClient`, which defers the connection instead of
-dialing eagerly)** so the worker process survives being launched while cluster-a is still
-coming up, rather than dying on the first failed `Dial`.
+**Known result, confirmed on a second pass:** the first attempt didn't reproduce — `worker-a`'s
+`newClient()` called a bare `client.Dial()` with no retry, then `log.Fatalln` on any error, so
+when raced against `docker compose start cluster-a`, the worker died on connection-refused
+before ever reaching its poll loop. `newClient()` now retries `Dial` for up to 2 minutes (1s
+between attempts) instead of failing fast. With that fix, the dispute **did** reproduce:
+`worker-a` logged `client.Dial ... failed (connection refused), retrying in 1s...`, connected
+on the next attempt, and was immediately handed the same activity a second time
+(`attempt=2 cluster=A executing`) — while cluster-b's `worker-b` had already completed it.
+`worker-a` ran the full duplicate execution, then got a clean rejection on reporting back:
+`Error workflow execution already completed`. Cluster A's own history afterward showed no
+trace of that attempt — identical to cluster-b's. Both clusters converged to one consistent
+result. This is the version-based conflict-resolution mechanism actually observed, not just
+read from source.
 
 ## Cleanup
 
