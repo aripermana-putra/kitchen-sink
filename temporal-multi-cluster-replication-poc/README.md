@@ -6,7 +6,11 @@ failover with one cluster actually stopped, rejoin after that outage, the intern
 namespace-handover (graceful drain) workflow, an attempt (unsuccessful) to force real
 replication lag via cluster metadata flags, and — as a separate, not-a-real-UCP-migration-path
 scenario for team reference — adding a second cluster to an already-populated single-cluster
-deployment and backfilling its pre-existing history with `force-replication`.
+deployment and backfilling its pre-existing history with `force-replication`. The final
+section introduces the PoC's first real worker to test whether Cluster A tries to resume a
+workflow Cluster B already finished while A was down — confirmed B genuinely completes what A
+started; the actual dispute race remains unreproduced, for a documented worker-code reason,
+not a Temporal one.
 
 Full narrative and results: see the UCP docs repo,
 `docs/projects/universal-control-plane-ucp/pocs/temporal-multi-cluster-replication/`
@@ -315,6 +319,108 @@ tune `OverallRps`/`ConcurrentActivityCount` in the input down deliberately, and 
 live cluster's own latency during the run — it reads from and writes replication tasks
 against the same database live traffic is using. Not load-tested at real scale here. See the
 research doc's side note on this scenario for the fuller checklist.
+
+## 14. Build the worker (first real worker in this PoC)
+
+Everything above only checked that data replicated — nothing was ever actually *executed* by
+a worker. This step and the next test what happens when Cluster A tries to resume a workflow
+Cluster B already finished while A was down.
+
+```shell
+cd worker
+go mod tidy   # resolves go.temporal.io/sdk — go.mod intentionally ships without a pinned version
+go build -o dispute-worker .
+cd ..
+```
+
+## 15. The dispute — workflow in-flight on A, completed on B, A comes back and races to redo it
+
+Use a fresh namespace to keep this isolated from everything above:
+
+```shell
+temporal --address 127.0.0.1:7233 operator namespace create --global-namespace true \
+  --cluster cluster-a --cluster cluster-b mcr-poc-dispute
+```
+
+Start `worker-a`, pointed at cluster-a:
+
+```shell
+CLUSTER_LABEL=A TEMPORAL_ADDRESS=127.0.0.1:7233 TEMPORAL_NAMESPACE=mcr-poc-dispute \
+  ./worker/dispute-worker worker &
+```
+
+Start one workflow against cluster-a, and confirm the activity is genuinely in-flight (started, not completed) before moving on:
+
+```shell
+WORKFLOW_ID=dispute-wf-1 TEMPORAL_ADDRESS=127.0.0.1:7233 TEMPORAL_NAMESPACE=mcr-poc-dispute \
+  ./worker/dispute-worker start
+
+temporal --address 127.0.0.1:7233 workflow show --namespace mcr-poc-dispute --workflow-id dispute-wf-1
+# Should show ActivityTaskStarted, no ActivityTaskCompleted yet — the activity sleeps 15s
+```
+
+Stop Cluster A **and** `worker-a` — a real mid-execution outage, not a clean shutdown:
+
+```shell
+kill %1   # or: pkill -f dispute-worker
+cd cluster-a && docker compose stop && cd ..
+```
+
+Forced failover to Cluster B:
+
+```shell
+temporal --address 127.0.0.1:8233 operator namespace update \
+  --namespace mcr-poc-dispute --active-cluster cluster-b
+```
+
+Start `worker-b`, pointed at cluster-b — its `StartToCloseTimeout` should already have
+elapsed, triggering a retry that `worker-b` picks up and actually completes:
+
+```shell
+CLUSTER_LABEL=B TEMPORAL_ADDRESS=127.0.0.1:8233 TEMPORAL_NAMESPACE=mcr-poc-dispute \
+  ./worker/dispute-worker worker &
+
+# Poll until COMPLETED, check the result mentions cluster=B
+temporal --address 127.0.0.1:8233 workflow show --namespace mcr-poc-dispute --workflow-id dispute-wf-1
+```
+
+Now restart Cluster A, with `worker-a` already running and polling **at the moment cluster-a's
+frontend becomes reachable again** — deliberately racing cluster-a's own stale-belief window
+rather than waiting for it to settle:
+
+```shell
+CLUSTER_LABEL=A TEMPORAL_ADDRESS=127.0.0.1:7233 TEMPORAL_NAMESPACE=mcr-poc-dispute \
+  ./worker/dispute-worker worker &
+cd cluster-a && docker compose start && cd ..
+```
+
+Watch `worker-a`'s own logs closely — does it get handed the activity a second time and
+actually re-execute it (a real duplicate side effect)? Then check the workflow's final,
+settled state on **both** clusters once things quiesce:
+
+```shell
+temporal --address 127.0.0.1:7233 workflow show --namespace mcr-poc-dispute --workflow-id dispute-wf-1
+temporal --address 127.0.0.1:8233 workflow show --namespace mcr-poc-dispute --workflow-id dispute-wf-1
+```
+
+Both should converge to one consistent result. If `worker-a` did re-execute, that's the
+dispute actually happening — the interesting result either way is whether reconciliation
+still lands on a single consistent final state despite it, per the version-based
+conflict-resolution mechanism (highest failover version wins) described in the research doc.
+This is timing-dependent — if it doesn't reproduce on the first attempt, that's a finding to
+record, not something to force by retrying indefinitely.
+
+**Known result from testing this once:** the dispute did not reproduce, because `worker-a`'s
+`newClient()` calls a bare `client.Dial()` with no retry, then `log.Fatalln` on any error. When
+raced against `docker compose start cluster-a`, cluster-a's frontend wasn't accepting
+connections yet — `Dial` failed, and `worker-a` died before ever reaching its poll loop; it
+never attempted the race at all. Waiting for `operator cluster health` to report `SERVING`
+before launching `worker-a` misses the window from the other side — cluster-a's namespace
+belief converges to cluster-b (~10s, per Phase 10) before health-polling even confirms
+`SERVING`. **To actually force this race, `worker/main.go`'s `newClient()` needs
+retry-on-connect logic (or use `client.NewLazyClient`, which defers the connection instead of
+dialing eagerly)** so the worker process survives being launched while cluster-a is still
+coming up, rather than dying on the first failed `Dial`.
 
 ## Cleanup
 

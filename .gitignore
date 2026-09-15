@@ -13,3 +13,4 @@ crash.*.log
 # Compiled binaries left at a PoC's root by `go build`
 keycloak-session-revoke/keycloak-session-revoke
 crossplane-xrd-versioned-schema-provisioning-poc/apiserver
+temporal-multi-cluster-replication-poc/worker/dispute-worker
