@@ -330,41 +330,41 @@ Cluster B already finished while A was down.
 
 ```shell
 cd worker
-go mod tidy   # resolves go.temporal.io/sdk — go.mod intentionally ships without a pinned version
+go mod tidy   # resolves go.temporal.io/sdk (pins v1.49.0 as of last run) and generates go.sum
 go build -o dispute-worker .
 cd ..
 ```
 
 ## 15. The dispute — workflow in-flight on A, completed on B, A comes back and races to redo it
 
-Use a fresh namespace to keep this isolated from everything above:
+Use a fresh namespace to keep this isolated from everything above. Pick a new `WORKFLOW_ID`
+each time you run this (the confirmed run below used `dispute-wf-4` — earlier IDs are already
+used up by prior attempts):
 
 ```shell
 temporal --address 127.0.0.1:7233 operator namespace create --global-namespace true \
   --cluster cluster-a --cluster cluster-b mcr-poc-dispute
 ```
 
-Start `worker-a`, pointed at cluster-a:
+**Important — chain the next block in one shell invocation, don't split it across separate
+commands.** The first time this was run, splitting "confirm in-flight" from "kill" cost
+enough inter-command latency (~90s) that the activity's 15s sleep completed and reported back
+*before* the kill ever ran — no outage actually happened. Run start → confirm → kill →
+stop together:
 
 ```shell
 CLUSTER_LABEL=A TEMPORAL_ADDRESS=127.0.0.1:7233 TEMPORAL_NAMESPACE=mcr-poc-dispute \
   ./worker/dispute-worker worker &
-```
+WORKER_A_PID=$!
 
-Start one workflow against cluster-a, and confirm the activity is genuinely in-flight (started, not completed) before moving on:
-
-```shell
-WORKFLOW_ID=dispute-wf-1 TEMPORAL_ADDRESS=127.0.0.1:7233 TEMPORAL_NAMESPACE=mcr-poc-dispute \
+WORKFLOW_ID=dispute-wf-4 TEMPORAL_ADDRESS=127.0.0.1:7233 TEMPORAL_NAMESPACE=mcr-poc-dispute \
   ./worker/dispute-worker start
 
-temporal --address 127.0.0.1:7233 workflow show --namespace mcr-poc-dispute --workflow-id dispute-wf-1
-# Should show ActivityTaskStarted, no ActivityTaskCompleted yet — the activity sleeps 15s
-```
+sleep 4   # land inside the 15s sleep, not after it — confirmed working at ~4-5s in
+temporal --address 127.0.0.1:7233 workflow show --namespace mcr-poc-dispute --workflow-id dispute-wf-4
+# Should show ActivityTaskStarted, no ActivityTaskCompleted yet
 
-Stop Cluster A **and** `worker-a` — a real mid-execution outage, not a clean shutdown:
-
-```shell
-kill %1   # or: pkill -f dispute-worker
+kill -9 "$WORKER_A_PID"
 cd cluster-a && docker compose stop && cd ..
 ```
 
@@ -383,12 +383,13 @@ CLUSTER_LABEL=B TEMPORAL_ADDRESS=127.0.0.1:8233 TEMPORAL_NAMESPACE=mcr-poc-dispu
   ./worker/dispute-worker worker &
 
 # Poll until COMPLETED, check the result mentions cluster=B
-temporal --address 127.0.0.1:8233 workflow show --namespace mcr-poc-dispute --workflow-id dispute-wf-1
+temporal --address 127.0.0.1:8233 workflow show --namespace mcr-poc-dispute --workflow-id dispute-wf-4
 ```
 
-Now restart Cluster A, with `worker-a` already running and polling **at the moment cluster-a's
-frontend becomes reachable again** — deliberately racing cluster-a's own stale-belief window
-rather than waiting for it to settle:
+Now the actual race: launch `worker-a` and restart Cluster A back-to-back, in the same
+invocation, so `worker-a` is already retrying its connection when cluster-a's frontend
+becomes reachable — `newClient()`'s retry-on-connect logic (up to 2 minutes, 1s between
+attempts) is what makes this survivable rather than fatal:
 
 ```shell
 CLUSTER_LABEL=A TEMPORAL_ADDRESS=127.0.0.1:7233 TEMPORAL_NAMESPACE=mcr-poc-dispute \
@@ -396,21 +397,26 @@ CLUSTER_LABEL=A TEMPORAL_ADDRESS=127.0.0.1:7233 TEMPORAL_NAMESPACE=mcr-poc-dispu
 cd cluster-a && docker compose start && cd ..
 ```
 
-Watch `worker-a`'s own logs closely — does it get handed the activity a second time and
-actually re-execute it (a real duplicate side effect)? Then check the workflow's final,
-settled state on **both** clusters once things quiesce:
+Watch `worker-a`'s own logs closely: expect `client.Dial ... failed (connection refused),
+retrying in 1s...` one or more times, then a successful connect, then — if the race lands —
+`attempt=2 cluster=A executing (sleeping 15s)`. If you see that line, the dispute is
+happening; let it run the full 15s and watch for the rejection when it reports back
+(`Error workflow execution already completed`, confirmed on the run that produced this note).
+
+Once things quiesce (give it at least 30-60s from cluster-a's restart), check the workflow's
+final state on **both** clusters:
 
 ```shell
-temporal --address 127.0.0.1:7233 workflow show --namespace mcr-poc-dispute --workflow-id dispute-wf-1
-temporal --address 127.0.0.1:8233 workflow show --namespace mcr-poc-dispute --workflow-id dispute-wf-1
+temporal --address 127.0.0.1:7233 workflow show --namespace mcr-poc-dispute --workflow-id dispute-wf-4
+temporal --address 127.0.0.1:8233 workflow show --namespace mcr-poc-dispute --workflow-id dispute-wf-4
 ```
 
-Both should converge to one consistent result. If `worker-a` did re-execute, that's the
-dispute actually happening — the interesting result either way is whether reconciliation
-still lands on a single consistent final state despite it, per the version-based
-conflict-resolution mechanism (highest failover version wins) described in the research doc.
-This is timing-dependent — if it doesn't reproduce on the first attempt, that's a finding to
-record, not something to force by retrying indefinitely.
+Both should converge to one consistent result (`"completed by cluster=B attempt=2"`,
+confirmed on the run below) regardless of whether `worker-a` actually raced — that's the
+version-based conflict-resolution mechanism (highest failover version wins) doing its job
+either way. This is still somewhat timing-dependent even with the fix — if `worker-a` doesn't
+get a second attempt on your first try, that's a finding to record, not something to force by
+retrying indefinitely.
 
 **Known result, confirmed on a second pass:** the first attempt didn't reproduce — `worker-a`'s
 `newClient()` called a bare `client.Dial()` with no retry, then `log.Fatalln` on any error, so
