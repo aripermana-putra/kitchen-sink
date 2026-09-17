@@ -1,0 +1,5 @@
+=== Horizon Workflow Approval Gate PoC (MCUCP-304) ===
+tenant_rns=rns:roc:iam::clsd-ucp kind_id=ucp_poc_vm_creation_approval team=clsd-ucp-team mode=test scenario=happy
+
+--- Login ---
+OneCloud username: 

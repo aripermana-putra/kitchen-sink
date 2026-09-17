@@ -14,3 +14,4 @@ crash.*.log
 keycloak-session-revoke/keycloak-session-revoke
 crossplane-xrd-versioned-schema-provisioning-poc/apiserver
 temporal-multi-cluster-replication-poc/worker/dispute-worker
+horizon-workflow-approval-gate-poc/horizon-workflow-approval-gate-poc

@@ -1,0 +1,275 @@
+=== Horizon Workflow Approval Gate PoC (MCUCP-304) ===
+tenant_rns=rns:roc:iam::clsd-ucp kind_id=ucp_poc_vm_creation_approval team=clsd-ucp-team mode=production scenario=happy
+
+--- Login ---
+OneCloud username: OneCloud password: 
+login ok (aripermana.putra@rakuten.com)
+
+--- Register Workflow kind (idempotent — ok if it already exists) ---
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds
+{
+  "description": "PoC for MCUCP-304: two-layer approval gate",
+  "id": "ucp_poc_vm_creation_approval",
+  "name": "UCP PoC VM Creation Approval"
+}
+<-- 409
+{"errors":[{"code":"WF0032","message":"Resource conflict.","detailedMessage":"A \"kind\" resource with the id \"ucp_poc_vm_creation_approval\" already exists.","metadata":{"resource_type":"kind","resource_id":"ucp_poc_vm_creation_approval"}}]}
+
+kind already exists — continuing (id/name are globally unique, so a prior run likely created it)
+
+--- Create definition draft ---
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/definitions
+{
+  "definition": {
+    "nodes": {
+      "end": {
+        "kind": "end",
+        "name": "Completed"
+      },
+      "network_team_approval": {
+        "kind": "step",
+        "name": "Network team approval",
+        "step_kind": "network_team_approval",
+        "triggers": {
+          "approve": {
+            "payload": {
+              "title": "Approve"
+            },
+            "users": [
+              {
+                "kind": "team",
+                "role": "admins",
+                "team": "clsd-ucp-team"
+              }
+            ]
+          },
+          "cancel": {
+            "payload": {
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "title": "Reject",
+              "type": "object"
+            },
+            "users": [
+              {
+                "kind": "user",
+                "user": "{{ created_by }}"
+              }
+            ]
+          },
+          "reject": {
+            "payload": {
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "title": "Reject",
+              "type": "object"
+            },
+            "users": [
+              {
+                "kind": "team",
+                "role": "admins",
+                "team": "clsd-ucp-team"
+              }
+            ]
+          }
+        }
+      },
+      "start": {
+        "kind": "start",
+        "name": "Started"
+      },
+      "tenant_admin_approval": {
+        "kind": "step",
+        "name": "Submitting tenant admin approval",
+        "step_kind": "tenant_admin_approval",
+        "triggers": {
+          "approve": {
+            "payload": {
+              "title": "Approve"
+            },
+            "users": [
+              {
+                "kind": "tenant",
+                "role": "admins",
+                "tenant_rns": "{{ params.tenant_rns }}"
+              }
+            ]
+          },
+          "cancel": {
+            "payload": {
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "title": "Reject",
+              "type": "object"
+            },
+            "users": [
+              {
+                "kind": "user",
+                "user": "{{ created_by }}"
+              }
+            ]
+          },
+          "reject": {
+            "payload": {
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "title": "Reject",
+              "type": "object"
+            },
+            "users": [
+              {
+                "kind": "tenant",
+                "role": "admins",
+                "tenant_rns": "{{ params.tenant_rns }}"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "payload_schema": {
+      "properties": {
+        "resource_id": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        },
+        "tenant_rns": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tenant_rns"
+      ],
+      "type": "object"
+    },
+    "transitions": [
+      {
+        "source": "start",
+        "target": "tenant_admin_approval"
+      },
+      {
+        "condition": "approve",
+        "source": "tenant_admin_approval",
+        "target": "network_team_approval"
+      },
+      {
+        "condition": "reject",
+        "result": "Rejected",
+        "source": "tenant_admin_approval",
+        "target": "end"
+      },
+      {
+        "condition": "cancel",
+        "result": "Canceled",
+        "source": "tenant_admin_approval",
+        "target": "end"
+      },
+      {
+        "condition": "approve",
+        "result": "Successful",
+        "source": "network_team_approval",
+        "target": "end"
+      },
+      {
+        "condition": "reject",
+        "result": "Rejected",
+        "source": "network_team_approval",
+        "target": "end"
+      },
+      {
+        "condition": "cancel",
+        "result": "Canceled",
+        "source": "network_team_approval",
+        "target": "end"
+      }
+    ]
+  }
+}
+<-- 201
+{"kind":"ucp_poc_vm_creation_approval","number":10,"version_major":null,"published":false,"published_at":null,"published_by":null,"created_at":"2026-09-17T08:36:47.832707Z","created_by":"aripermana.putra@rakuten.com","updated_at":null,"updated_by":null,"update_number":0,"disabled":true,"definition":{"nodes":{"end":{"kind":"end","name":"Completed"},"network_team_approval":{"kind":"step","name":"Network team approval","step_kind":"network_team_approval","triggers":{"approve":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Approve"},"users":[{"kind":"team","team":"clsd-ucp-team","role":"admins"}],"notes":[],"adapter_only":false},"cancel":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"kind":"user","user":"{{ created_by }}"}],"notes":[],"adapter_only":false},"reject":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"kind":"team","team":"clsd-ucp-team","role":"admins"}],"notes":[],"adapter_only":false}},"skip_if":null,"skip_with":null,"skipped_label":null,"adapters":[]},"start":{"kind":"start","name":"Started"},"tenant_admin_approval":{"kind":"step","name":"Submitting tenant admin approval","step_kind":"tenant_admin_approval","triggers":{"approve":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Approve"},"users":[{"kind":"tenant","tenant_rns":"{{ params.tenant_rns }}","role":"admins"}],"notes":[],"adapter_only":false},"cancel":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"kind":"user","user":"{{ created_by }}"}],"notes":[],"adapter_only":false},"reject":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"kind":"tenant","tenant_rns":"{{ params.tenant_rns }}","role":"admins"}],"notes":[],"adapter_only":false}},"skip_if":null,"skip_with":null,"skipped_label":null,"adapters":[]}},"transitions":[{"source":"start","target":"tenant_admin_approval","condition":null,"result":null},{"source":"tenant_admin_approval","target":"network_team_approval","condition":"approve","result":null},{"source":"tenant_admin_approval","target":"end","condition":"reject","result":"Rejected"},{"source":"tenant_admin_approval","target":"end","condition":"cancel","result":"Canceled"},{"source":"network_team_approval","target":"end","condition":"approve","result":"Successful"},{"source":"network_team_approval","target":"end","condition":"reject","result":"Rejected"},{"source":"network_team_approval","target":"end","condition":"cancel","result":"Canceled"}],"payload_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"resource_id":{"type":"string"},"resource_type":{"type":"string"},"tenant_rns":{"type":"string"}},"required":["tenant_rns"],"type":"object"},"view":null,"fingerprint_fields":null,"viewers":[]},"builder_meta":null}
+
+definition draft number: 10
+
+--- Publish definition draft ---
+--> PUT /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/definitions/10/publish
+<-- 200
+{"kind":"ucp_poc_vm_creation_approval","number":10,"version_major":4,"published":true,"published_at":"2026-09-17T08:36:48.077750Z","published_by":"aripermana.putra@rakuten.com","created_at":"2026-09-17T08:36:47.832707Z","created_by":"aripermana.putra@rakuten.com","updated_at":"2026-09-17T08:36:48.077750Z","updated_by":"aripermana.putra@rakuten.com","update_number":0,"disabled":false,"definition":{"nodes":{"end":{"kind":"end","name":"Completed"},"network_team_approval":{"kind":"step","name":"Network team approval","step_kind":"network_team_approval","triggers":{"approve":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Approve"},"users":[{"kind":"team","team":"clsd-ucp-team","role":"admins"}],"notes":[],"adapter_only":false},"cancel":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"kind":"user","user":"{{ created_by }}"}],"notes":[],"adapter_only":false},"reject":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"kind":"team","team":"clsd-ucp-team","role":"admins"}],"notes":[],"adapter_only":false}},"skip_if":null,"skip_with":null,"skipped_label":null,"adapters":[]},"start":{"kind":"start","name":"Started"},"tenant_admin_approval":{"kind":"step","name":"Submitting tenant admin approval","step_kind":"tenant_admin_approval","triggers":{"approve":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Approve"},"users":[{"kind":"tenant","tenant_rns":"{{ params.tenant_rns }}","role":"admins"}],"notes":[],"adapter_only":false},"cancel":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"kind":"user","user":"{{ created_by }}"}],"notes":[],"adapter_only":false},"reject":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"kind":"tenant","tenant_rns":"{{ params.tenant_rns }}","role":"admins"}],"notes":[],"adapter_only":false}},"skip_if":null,"skip_with":null,"skipped_label":null,"adapters":[]}},"transitions":[{"source":"start","target":"tenant_admin_approval","condition":null,"result":null},{"source":"tenant_admin_approval","target":"network_team_approval","condition":"approve","result":null},{"source":"tenant_admin_approval","target":"end","condition":"reject","result":"Rejected"},{"source":"tenant_admin_approval","target":"end","condition":"cancel","result":"Canceled"},{"source":"network_team_approval","target":"end","condition":"approve","result":"Successful"},{"source":"network_team_approval","target":"end","condition":"reject","result":"Rejected"},{"source":"network_team_approval","target":"end","condition":"cancel","result":"Canceled"}],"payload_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"resource_id":{"type":"string"},"resource_type":{"type":"string"},"tenant_rns":{"type":"string"}},"required":["tenant_rns"],"type":"object"},"view":null,"fingerprint_fields":null,"viewers":[]},"builder_meta":null}
+
+published version: 4
+
+--- Create production workflow ---
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/4/workflows
+{
+  "payload": {
+    "resource_id": "poc-vm-001",
+    "resource_type": "vm",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 202
+{"workflow_id":"1x77bs-pVgYCdrvcqPSFMay","job_id":"1x77bs-pVgYCdrvcqPSFMay","status":"pending"}
+
+production workflow id: 1x77bs-pVgYCdrvcqPSFMay
+Production workflows process automatically — no equivalent of `process` for test workflows is needed.
+--> GET /workflow-sapi/2/jobs/1x77bs-pVgYCdrvcqPSFMay
+<-- 200
+{"id":"1x77bs-pVgYCdrvcqPSFMay","created_by":"aripermana.putra@rakuten.com","created_at":"2026-09-17T08:36:48.268Z","updated_at":"2026-09-17T08:36:48.268Z","kind":{"id":"ucp_poc_vm_creation_approval","name":"UCP PoC VM Creation Approval"},"definition_version":4,"states":{"current":"Started","result":null},"execution_status":"processing","steps":[],"triggers":[],"user_triggers":[],"viewers":[],"parameters":{"resource_id":"poc-vm-001","resource_type":"vm","tenant_rns":"rns:roc:iam::clsd-ucp"},"cards":[{"type":"card","title":"Parameters","components":[{"type":"value","key":"created_by","label":"Created By","value":"aripermana.putra@rakuten.com","collapsible":false},{"type":"value","key":"resource_id","label":"Resource Id","value":"poc-vm-001","collapsible":false},{"type":"value","key":"resource_type","label":"Resource Type","value":"vm","collapsible":false},{"type":"value","key":"tenant_rns","label":"Tenant Rns","value":"rns:roc:iam::clsd-ucp","collapsible":false}]}],"notes":[],"attachments":null}
+
+execution_status: processing
+
+About to trigger layer 1: approve. Press Enter to continue.
+
+--- Trigger layer 1: approve ---
+--> POST /workflow-sapi/2/jobs/1x77bs-pVgYCdrvcqPSFMay/approve
+{}
+<-- 200
+{"workflow_id":"1x77bs-pVgYCdrvcqPSFMay","job_id":"1x77bs-pVgYCdrvcqPSFMay","status":"success"}
+
+--> GET /workflow-sapi/2/jobs/1x77bs-pVgYCdrvcqPSFMay
+<-- 200
+{"id":"1x77bs-pVgYCdrvcqPSFMay","created_by":"aripermana.putra@rakuten.com","created_at":"2026-09-17T08:36:48.268Z","updated_at":"2026-09-17T08:38:29.364Z","kind":{"id":"ucp_poc_vm_creation_approval","name":"UCP PoC VM Creation Approval"},"definition_version":4,"states":{"current":"Network team approval","result":null},"execution_status":"waiting","steps":[{"id":"a2ab3ace-c93a-4878-a595-25c7db9182fd","label":"Submitting tenant admin approval","approvers":["aripermana.putra@rakuten.com","govind.madhu@rakuten.com","krishna.chalwetkar@rakuten.com","rania.benkahla@rakuten.com","ryo.kimura@rakuten.com","sebasti.bellefeuille@rakuten.com","yusuke.a.ohashi@rakuten.com"],"created_at":"2026-09-17T08:36:49.425Z","completed_at":"2026-09-17T08:38:29.304Z","result_state":"Approved","is_skipped":false,"users":[],"triggers_users":{"approve":[{"id":"tenant/tenant_rns=rns%3Aroc%3Aiam%3A%3Aclsd-ucp&role=admins","spec":{"kind":"tenant","tenant_rns":"rns:roc:iam::clsd-ucp","role":"admins"},"emails":["aripermana.putra@rakuten.com","govind.madhu@rakuten.com","krishna.chalwetkar@rakuten.com","rania.benkahla@rakuten.com","ryo.kimura@rakuten.com","sebasti.bellefeuille@rakuten.com","yusuke.a.ohashi@rakuten.com"],"title":"ROC tenant clsd-ucp admins","backup_of":null}],"cancel":[{"id":"user/user=aripermana.putra%40rakuten.com","spec":{"kind":"user","user":"aripermana.putra@rakuten.com"},"emails":["aripermana.putra@rakuten.com"],"title":"User aripermana.putra@rakuten.com","backup_of":null}],"reject":[{"id":"tenant/tenant_rns=rns%3Aroc%3Aiam%3A%3Aclsd-ucp&role=admins","spec":{"kind":"tenant","tenant_rns":"rns:roc:iam::clsd-ucp","role":"admins"},"emails":["aripermana.putra@rakuten.com","govind.madhu@rakuten.com","krishna.chalwetkar@rakuten.com","rania.benkahla@rakuten.com","ryo.kimura@rakuten.com","sebasti.bellefeuille@rakuten.com","yusuke.a.ohashi@rakuten.com"],"title":"ROC tenant clsd-ucp admins","backup_of":null}]}},{"id":"73b5db10-50af-4ac2-a45e-699b17dcd676","label":"Network team approval","approvers":["aripermana.putra@rakuten.com"],"created_at":"2026-09-17T08:38:29.553Z","completed_at":null,"result_state":null,"is_skipped":false,"users":[],"triggers_users":{"approve":[{"id":"team/team=clsd-ucp-team&role=admins","spec":{"kind":"team","team":"clsd-ucp-team","role":"admins"},"emails":["aripermana.putra@rakuten.com"],"title":"Team clsd-ucp-team admins","backup_of":null}],"cancel":[{"id":"user/user=aripermana.putra%40rakuten.com","spec":{"kind":"user","user":"aripermana.putra@rakuten.com"},"emails":["aripermana.putra@rakuten.com"],"title":"User aripermana.putra@rakuten.com","backup_of":null}],"reject":[{"id":"team/team=clsd-ucp-team&role=admins","spec":{"kind":"team","team":"clsd-ucp-team","role":"admins"},"emails":["aripermana.putra@rakuten.com"],"title":"Team clsd-ucp-team admins","backup_of":null}]}}],"triggers":[{"id":"caba596d-fd75-4afb-b007-084e18b6d8fc","step_id":"a2ab3ace-c93a-4878-a595-25c7db9182fd","created_at":"2026-09-17T08:38:29.149Z","created_by":"aripermana.putra@rakuten.com","label":"Approve","kind":"approve","message":null}],"user_triggers":[{"required":true,"trigger":"approve","allowed":true,"payload_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Approve"},"notes":[]},{"required":true,"trigger":"cancel","allowed":true,"payload_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"notes":[]},{"required":true,"trigger":"reject","allowed":true,"payload_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"notes":[]}],"viewers":[],"parameters":{"resource_id":"poc-vm-001","resource_type":"vm","tenant_rns":"rns:roc:iam::clsd-ucp"},"cards":[{"type":"card","title":"Parameters","components":[{"type":"value","key":"created_by","label":"Created By","value":"aripermana.putra@rakuten.com","collapsible":false},{"type":"value","key":"resource_id","label":"Resource Id","value":"poc-vm-001","collapsible":false},{"type":"value","key":"resource_type","label":"Resource Type","value":"vm","collapsible":false},{"type":"value","key":"tenant_rns","label":"Tenant Rns","value":"rns:roc:iam::clsd-ucp","collapsible":false}]}],"notes":[],"attachments":null}
+
+execution_status: waiting
+
+Layer 1 approved. The workflow should now be sitting at network_team_approval. Press Enter to trigger layer 2 (clsd-ucp-team) approval.
+
+--- Trigger layer 2: approve ---
+--> POST /workflow-sapi/2/jobs/1x77bs-pVgYCdrvcqPSFMay/approve
+{}
+<-- 200
+{"workflow_id":"1x77bs-pVgYCdrvcqPSFMay","job_id":"1x77bs-pVgYCdrvcqPSFMay","status":"success"}
+
+--> GET /workflow-sapi/2/jobs/1x77bs-pVgYCdrvcqPSFMay
+<-- 200
+{"id":"1x77bs-pVgYCdrvcqPSFMay","created_by":"aripermana.putra@rakuten.com","created_at":"2026-09-17T08:36:48.268Z","updated_at":"2026-09-17T08:39:03.766Z","kind":{"id":"ucp_poc_vm_creation_approval","name":"UCP PoC VM Creation Approval"},"definition_version":4,"states":{"current":"Completed","result":"Successful"},"execution_status":"completed","steps":[{"id":"a2ab3ace-c93a-4878-a595-25c7db9182fd","label":"Submitting tenant admin approval","approvers":["aripermana.putra@rakuten.com","govind.madhu@rakuten.com","krishna.chalwetkar@rakuten.com","rania.benkahla@rakuten.com","ryo.kimura@rakuten.com","sebasti.bellefeuille@rakuten.com","yusuke.a.ohashi@rakuten.com"],"created_at":"2026-09-17T08:36:49.425Z","completed_at":"2026-09-17T08:38:29.304Z","result_state":"Approved","is_skipped":false,"users":[],"triggers_users":{"approve":[{"id":"tenant/tenant_rns=rns%3Aroc%3Aiam%3A%3Aclsd-ucp&role=admins","spec":{"kind":"tenant","tenant_rns":"rns:roc:iam::clsd-ucp","role":"admins"},"emails":["aripermana.putra@rakuten.com","govind.madhu@rakuten.com","krishna.chalwetkar@rakuten.com","rania.benkahla@rakuten.com","ryo.kimura@rakuten.com","sebasti.bellefeuille@rakuten.com","yusuke.a.ohashi@rakuten.com"],"title":"ROC tenant clsd-ucp admins","backup_of":null}],"cancel":[{"id":"user/user=aripermana.putra%40rakuten.com","spec":{"kind":"user","user":"aripermana.putra@rakuten.com"},"emails":["aripermana.putra@rakuten.com"],"title":"User aripermana.putra@rakuten.com","backup_of":null}],"reject":[{"id":"tenant/tenant_rns=rns%3Aroc%3Aiam%3A%3Aclsd-ucp&role=admins","spec":{"kind":"tenant","tenant_rns":"rns:roc:iam::clsd-ucp","role":"admins"},"emails":["aripermana.putra@rakuten.com","govind.madhu@rakuten.com","krishna.chalwetkar@rakuten.com","rania.benkahla@rakuten.com","ryo.kimura@rakuten.com","sebasti.bellefeuille@rakuten.com","yusuke.a.ohashi@rakuten.com"],"title":"ROC tenant clsd-ucp admins","backup_of":null}]}},{"id":"73b5db10-50af-4ac2-a45e-699b17dcd676","label":"Network team approval","approvers":["aripermana.putra@rakuten.com"],"created_at":"2026-09-17T08:38:29.553Z","completed_at":"2026-09-17T08:39:03.670Z","result_state":"Approved","is_skipped":false,"users":[],"triggers_users":{"approve":[{"id":"team/team=clsd-ucp-team&role=admins","spec":{"kind":"team","team":"clsd-ucp-team","role":"admins"},"emails":["aripermana.putra@rakuten.com"],"title":"Team clsd-ucp-team admins","backup_of":null}],"cancel":[{"id":"user/user=aripermana.putra%40rakuten.com","spec":{"kind":"user","user":"aripermana.putra@rakuten.com"},"emails":["aripermana.putra@rakuten.com"],"title":"User aripermana.putra@rakuten.com","backup_of":null}],"reject":[{"id":"team/team=clsd-ucp-team&role=admins","spec":{"kind":"team","team":"clsd-ucp-team","role":"admins"},"emails":["aripermana.putra@rakuten.com"],"title":"Team clsd-ucp-team admins","backup_of":null}]}}],"triggers":[{"id":"caba596d-fd75-4afb-b007-084e18b6d8fc","step_id":"a2ab3ace-c93a-4878-a595-25c7db9182fd","created_at":"2026-09-17T08:38:29.149Z","created_by":"aripermana.putra@rakuten.com","label":"Approve","kind":"approve","message":null},{"id":"b82b2295-50ac-48f4-a164-7805be84785e","step_id":"73b5db10-50af-4ac2-a45e-699b17dcd676","created_at":"2026-09-17T08:39:03.355Z","created_by":"aripermana.putra@rakuten.com","label":"Approve","kind":"approve","message":null}],"user_triggers":[],"viewers":[],"parameters":{"resource_id":"poc-vm-001","resource_type":"vm","tenant_rns":"rns:roc:iam::clsd-ucp"},"cards":[{"type":"card","title":"Parameters","components":[{"type":"value","key":"created_by","label":"Created By","value":"aripermana.putra@rakuten.com","collapsible":false},{"type":"value","key":"resource_id","label":"Resource Id","value":"poc-vm-001","collapsible":false},{"type":"value","key":"resource_type","label":"Resource Type","value":"vm","collapsible":false},{"type":"value","key":"tenant_rns","label":"Tenant Rns","value":"rns:roc:iam::clsd-ucp","collapsible":false}]}],"notes":[],"attachments":null}
+
+execution_status: completed
+
+--- Final state ---
+
+--- Visibility check: GET /jobs filtered to this operator ---
+(mirrors what a UCP-native interface would call instead of the OneCloud Portal)
+--> GET /workflow-sapi/2/jobs?created_by=aripermana.putra%40rakuten.com
+<-- 200
+{"page":{"size":10,"totalElements":0,"totalPages":0,"number":0},"links":{"self":{"href":"/workflow-sapi/2/jobs?page=0&per_page=10"},"first":{"href":"/workflow-sapi/2/jobs?page=0&per_page=10"},"last":{"href":"/workflow-sapi/2/jobs?page=-1&per_page=10"},"previous":null,"next":null},"results":[]}
+
+--> GET /workflow-sapi/2/jobs?approver=aripermana.putra%40rakuten.com
+<-- 200
+{"page":{"size":10,"totalElements":0,"totalPages":0,"number":0},"links":{"self":{"href":"/workflow-sapi/2/jobs?page=0&per_page=10"},"first":{"href":"/workflow-sapi/2/jobs?page=0&per_page=10"},"last":{"href":"/workflow-sapi/2/jobs?page=-1&per_page=10"},"previous":null,"next":null},"results":[]}
+
+
+Expected result: execution_status completed, workflow at 'end' with outcome Successful.
