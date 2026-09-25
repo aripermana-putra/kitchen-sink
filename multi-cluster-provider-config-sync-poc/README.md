@@ -499,10 +499,19 @@ ArgoCD has a full web UI, served by the same `argocd-server` Deployment the CLI
 talks to — no separate install:
 
 ```sh
-kubectl --context k3d-argocd-hub -n argocd port-forward svc/argocd-server 8080:443
+kubectl --context k3d-argocd-hub -n argocd port-forward svc/argocd-server 8443:443
 ```
 
-Open `https://localhost:8080` (self-signed cert — accept the browser warning).
+**Do not use local port 8080** — it's already bound by the `argocd-hub`
+cluster's own k3d ingress load balancer (`-p "8080:80@loadbalancer"` in step 1),
+via a Colima SSH tunnel process that owns that host port continuously. A
+port-forward targeting 8080 fails to bind (or appears to "work" while you're
+actually hitting the k3d ingress instead), and the browser just sees Traefik's
+default 404 page — which looks exactly like "argocd isn't there" but has
+nothing to do with ArgoCD. Confirm what's holding a port with
+`lsof -nP -iTCP:<port> -sTCP:LISTEN` before assuming a port-forward is broken.
+
+Open `https://localhost:8443` (self-signed cert — accept the browser warning).
 Username `admin`, password from:
 
 ```sh
@@ -515,8 +524,7 @@ Applications tree view shows every generated `Application` and its live sync
 status), and for inspecting a specific `Application`'s resource tree
 (`ExternalSecret` → `Secret` → `ProviderConfig`) without separate `kubectl`
 calls per object. Same port-forward + credential the CLI login in step 8 uses —
-run both against the same forwarded port if you want CLI and UI open at once
-(`8443` for CLI examples above, `8080` here, or reuse either port for both).
+reuse the same forwarded port 8443 for both, no need to run two forwards.
 
 ---
 
@@ -625,6 +633,7 @@ from a `Secret`, regardless of credential mechanism.
 | `ExternalSecret` stuck `SecretSyncedError` | `eso-gcp-sm-key` Secret missing/wrong, or the GCP secret referenced by the `ExternalSecret`'s `remoteRef.key` doesn't exist yet | Run `05-setup-gcp-secret-manager-access.sh`, confirm the secret exists with `gcloud secrets describe <name>` |
 | ArgoCD `Application` for a GitHub-hosted source shows `ComparisonError` after the repo moves/is recreated | Stale repo credential Secret pointing at the old URL | Re-run `06-apply-platform-appsets.sh` — it deletes and recreates the credential |
 | `argocd app list` shows extra `*-in-cluster` entries alongside your real clusters | The `clusters: {}` generator with no selector also matches ArgoCD's own built-in `in-cluster` entry | Label real target clusters (`mcucp.io/role: crossplane`, done automatically by `03-register-cluster-with-argocd.sh`) and scope the generator with a `selector.matchLabels` — already the default in this repo's `ApplicationSet`s |
+| ArgoCD Web UI shows "not found" / a generic 404 at `https://localhost:8080` after port-forwarding | Host port 8080 is already bound by the `argocd-hub` cluster's own k3d ingress load balancer (`-p "8080:80@loadbalancer"`) — you're hitting Traefik's default backend, not the port-forward | Use a different local port, e.g. `8443`; check what's actually holding a port first with `lsof -nP -iTCP:<port> -sTCP:LISTEN` |
 
 ---
 
