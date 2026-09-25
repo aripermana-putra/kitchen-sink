@@ -17,3 +17,5 @@ Personal playground for trying out libraries, patterns, and tools.
 | [`cloud-monitoring-poc`](./cloud-monitoring-poc) | GCP Cloud Monitoring deployment sandbox |
 | [`temporal-multi-cluster-replication-poc`](./temporal-multi-cluster-replication-poc) | Two-cluster Temporal Multi-Cluster Replication PoC — registration, namespace/history replication, both failover scenarios, rejoin, namespace handover, and adding a cluster to an already-populated deployment |
 | [`terraform-gameday`](./terraform-gameday) | AWS gameday prep — Terraform VPC scenario plus up/down scripts for practicing incident scenarios |
+| [`multi-cluster-provider-config-sync-poc`](./multi-cluster-provider-config-sync-poc) | MCUCP-306 — validates ArgoCD ApplicationSet matrix-generator fan-out of ExternalSecret+ProviderConfig across a growing set of local k3d Crossplane clusters |
+| [`gcloud-netskope-tls-fix`](./gcloud-netskope-tls-fix) | Fixes `gcloud`/Python SSL failures caused by Netskope's non-RFC5280-compliant corporate CA certs, without disabling verification |
