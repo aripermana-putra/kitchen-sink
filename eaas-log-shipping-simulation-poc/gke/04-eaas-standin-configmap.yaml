@@ -1,0 +1,58 @@
+# In-cluster stand-in pipeline for the GKE track only.
+#
+# design.md's original Phase 2 plan was to reach the single local docker-compose stand-in pipeline
+# from the sandbox GKE cluster via a cloudflared/ngrok TCP tunnel. Execution found this
+# unavailable without a paid/registered account (ngrok requires an authtoken; cloudflared's
+# anonymous "quick tunnel" TCP mode returned "websocket: bad handshake" against `cloudflared
+# access tcp` in this environment, reproduced twice with fresh tunnels — see implementation.md).
+# Adaptation: this stand-in pipeline runs *in the same GKE cluster* as the Filebeat DaemonSet
+# instead, removing the need for any tunnel. This still fully satisfies the PoC's actual goal
+# (shipper config + parsing correctness for the sample-go-service log shape) — it does not
+# change what is being tested, only where the stand-in pipeline physically runs. Kafka is
+# omitted here (Elasticsearch + Logstash + Kibana only) since durability-buffer behavior is
+# already exercised by the Colima-facing stand-in pipeline; this is a scope reduction specific
+# to working around the tunnel blocker, not a finding about Kafka itself.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eaas-standin-pipeline
+  namespace: eaas-poc
+data:
+  eaas-standin.conf: |
+    input {
+      beats {
+        port => 5044
+      }
+    }
+
+    filter {
+      if [fields][geap][log_group] == "sample-go-service" {
+        json {
+          source => "message"
+          target => "parsed"
+        }
+        mutate {
+          add_field => {
+            "level" => "%{[parsed][level]}"
+            "request_id" => "%{[parsed][request_id]}"
+            "user_id" => "%{[parsed][user_id]}"
+            "app_msg" => "%{[parsed][msg]}"
+          }
+          remove_field => ["parsed"]
+        }
+      }
+
+      mutate {
+        add_field => {
+          "geap_log_group" => "%{[fields][geap][log_group]}"
+          "geap_client_id" => "%{[fields][geap][client_id]}"
+        }
+      }
+    }
+
+    output {
+      elasticsearch {
+        hosts => ["http://eaas-standin-es:9200"]
+        index => "eaas_stg-poc_%{[geap_client_id]}_%{[geap_log_group]}-%{+YYYY.MM.dd}"
+      }
+    }

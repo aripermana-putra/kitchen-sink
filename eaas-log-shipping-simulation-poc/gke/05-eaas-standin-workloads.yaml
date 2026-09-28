@@ -1,0 +1,128 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eaas-standin-es
+  namespace: eaas-poc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eaas-standin-es
+  template:
+    metadata:
+      labels:
+        app: eaas-standin-es
+    spec:
+      containers:
+        - name: elasticsearch
+          image: docker.elastic.co/elasticsearch/elasticsearch:7.17.18
+          env:
+            - name: discovery.type
+              value: single-node
+            - name: xpack.security.enabled
+              value: "false"
+            - name: ES_JAVA_OPTS
+              value: "-Xms512m -Xmx512m"
+          ports:
+            - containerPort: 9200
+          resources:
+            requests:
+              memory: "1Gi"
+            limits:
+              memory: "1500Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eaas-standin-es
+  namespace: eaas-poc
+spec:
+  selector:
+    app: eaas-standin-es
+  ports:
+    - port: 9200
+      targetPort: 9200
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eaas-standin-logstash
+  namespace: eaas-poc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eaas-standin-logstash
+  template:
+    metadata:
+      labels:
+        app: eaas-standin-logstash
+    spec:
+      containers:
+        - name: logstash
+          image: docker.elastic.co/logstash/logstash:7.17.18
+          env:
+            - name: LS_JAVA_OPTS
+              value: "-Xms512m -Xmx512m"
+          ports:
+            - containerPort: 5044
+          volumeMounts:
+            - name: pipeline
+              mountPath: /usr/share/logstash/pipeline
+          resources:
+            requests:
+              memory: "1Gi"
+            limits:
+              memory: "1500Mi"
+      volumes:
+        - name: pipeline
+          configMap:
+            name: eaas-standin-pipeline
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eaas-standin-logstash
+  namespace: eaas-poc
+spec:
+  selector:
+    app: eaas-standin-logstash
+  ports:
+    - port: 5044
+      targetPort: 5044
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eaas-standin-kibana
+  namespace: eaas-poc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eaas-standin-kibana
+  template:
+    metadata:
+      labels:
+        app: eaas-standin-kibana
+    spec:
+      containers:
+        - name: kibana
+          image: docker.elastic.co/kibana/kibana:7.17.18
+          env:
+            - name: ELASTICSEARCH_HOSTS
+              value: "http://eaas-standin-es:9200"
+          ports:
+            - containerPort: 5601
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eaas-standin-kibana
+  namespace: eaas-poc
+spec:
+  selector:
+    app: eaas-standin-kibana
+  ports:
+    - port: 5601
+      targetPort: 5601

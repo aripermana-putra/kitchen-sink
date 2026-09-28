@@ -1,0 +1,38 @@
+# Sample Go-service-shaped workload for the EaaS Log Shipping Simulation PoC.
+# Emits ADR-007 slog-convention structured JSON to stdout on a loop. A shell loop is used
+# instead of a compiled Go binary since the PoC is testing log *shape* ingestion, not app logic.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-go-service
+  namespace: eaas-poc
+  labels:
+    app: sample-go-service
+    ucp.io/log-group: sample-go-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sample-go-service
+  template:
+    metadata:
+      labels:
+        app: sample-go-service
+        ucp.io/log-group: sample-go-service
+    spec:
+      containers:
+        - name: sample-go-service
+          image: busybox:1.36
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              i=0
+              while true; do
+                i=$((i+1))
+                ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                echo "{\"level\":\"info\",\"ts\":\"${ts}\",\"msg\":\"handled request\",\"request_id\":\"req-${i}\",\"user_id\":\"user-42\",\"method\":\"GET\",\"path\":\"/v1/resources\",\"status\":200}"
+                if [ $((i % 5)) -eq 0 ]; then
+                  echo "{\"level\":\"error\",\"ts\":\"${ts}\",\"msg\":\"upstream timeout\",\"request_id\":\"req-${i}\",\"user_id\":\"user-42\",\"error\":\"context deadline exceeded\"}"
+                fi
+                sleep 3
+              done

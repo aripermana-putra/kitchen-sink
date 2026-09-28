@@ -1,0 +1,160 @@
+# Shared Filebeat DaemonSet for the local "colima" (default profile) k3s cluster, which already
+# runs real UCP Temporal Server + Temporal Workers (ucp-provisioning-worker, drift-worker) +
+# Crossplane core/providers — discovered running during PoC execution, more representative than
+# the design's planned MCR-PoC/crossplane-xrd-catalog-source-PoC reuse (see implementation.md).
+# One DaemonSet covers all three log groups via metadata-based routing (namespace + pod labels),
+# per design.md's "shared shipper, not sidecar-per-pod" decision.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: eaas-poc
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: filebeat
+  namespace: eaas-poc
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: filebeat-poc
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "pods", "nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: filebeat-poc
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: filebeat-poc
+subjects:
+  - kind: ServiceAccount
+    name: filebeat
+    namespace: eaas-poc
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: filebeat-config
+  namespace: eaas-poc
+data:
+  filebeat.yml: |
+    filebeat.inputs:
+      - type: container
+        paths:
+          - /var/log/containers/*_temporal-system_*.log
+          - /var/log/containers/*_crossplane-system_*.log
+
+    processors:
+      - add_kubernetes_metadata:
+          host: ${NODE_NAME}
+          matchers:
+            - logs_path:
+                logs_path: "/var/log/containers/"
+      - if:
+          equals:
+            kubernetes.labels.app_kubernetes_io/name: "temporal"
+        then:
+          - add_fields:
+              target: fields
+              fields:
+                geap:
+                  log_group: temporal-server
+                  client_id: ucp-poc
+                  client_secret: synthetic-secret-not-real
+        else:
+          - if:
+              or:
+                - equals:
+                    kubernetes.labels.app: "ucp-provisioning-worker"
+                - equals:
+                    kubernetes.labels.app: "drift-worker"
+            then:
+              - add_fields:
+                  target: fields
+                  fields:
+                    geap:
+                      log_group: temporal-worker
+                      client_id: ucp-poc
+                      client_secret: synthetic-secret-not-real
+            else:
+              - if:
+                  equals:
+                    kubernetes.namespace: "crossplane-system"
+                then:
+                  - add_fields:
+                      target: fields
+                      fields:
+                        geap:
+                          log_group: crossplane-core
+                          client_id: ucp-poc
+                          client_secret: synthetic-secret-not-real
+                else:
+                  - drop_event: ~
+
+    tags: ["poc", "colima", "eaas-log-shipping-simulation"]
+
+    output.logstash:
+      hosts: ["192.168.5.2:5044"]
+
+    logging.level: info
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: filebeat
+  namespace: eaas-poc
+spec:
+  selector:
+    matchLabels:
+      app: filebeat
+  template:
+    metadata:
+      labels:
+        app: filebeat
+    spec:
+      serviceAccountName: filebeat
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: filebeat
+          image: docker.elastic.co/beats/filebeat:7.17.18
+          args: ["-c", "/etc/filebeat.yml", "-e"]
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: config
+              mountPath: /etc/filebeat.yml
+              subPath: filebeat.yml
+              readOnly: true
+            - name: varlogcontainers
+              mountPath: /var/log/containers
+              readOnly: true
+            - name: varlogpods
+              mountPath: /var/log/pods
+              readOnly: true
+            - name: varlibdockercontainers
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: filebeat-config
+        - name: varlogcontainers
+          hostPath:
+            path: /var/log/containers
+        - name: varlogpods
+          hostPath:
+            path: /var/log/pods
+        - name: varlibdockercontainers
+          hostPath:
+            path: /var/lib/docker/containers
