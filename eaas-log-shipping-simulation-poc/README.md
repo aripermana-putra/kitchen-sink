@@ -34,12 +34,77 @@ design.md" for why the shapes differ slightly from the original design.
 
 ## Prerequisites
 
-```sh
-export PATH="/opt/homebrew/share/google-cloud-sdk/bin:$PATH"   # gke-gcloud-auth-plugin
-gcloud container clusters get-credentials ucp-agent-cluster --region=asia-northeast1 --project=sub-gcp-ucp-clsd-sandbox
+Each item below explains *why* it's needed and how to confirm it's actually in place —
+don't skip the verify step, this is where an environment that looks fine on paper turns out not
+to be.
 
-colima start ucp-crossplane   # hosts the eaas-standin docker-compose stack
-colima start default          # the pre-existing Temporal/Crossplane cluster (context: colima)
+### 1. Tools installed
+
+```sh
+gcloud version    # tested with Google Cloud SDK 563.0.0
+kubectl version --client   # tested with v1.35.3
+colima version    # tested with colima 0.10.1
+docker --version  # tested with Docker 29.3.1 (colima's bundled docker CLI)
+```
+**Verify:** all four commands print a version with no "command not found." If any are missing,
+install via `brew install google-cloud-sdk kubectl colima docker` (macOS/Homebrew).
+
+### 2. `gcloud` authenticated against the sandbox project
+
+Needed to fetch GKE credentials for the sandbox cluster (Step 2 onward, GKE track).
+
+```sh
+gcloud config set project sub-gcp-ucp-clsd-sandbox
+gcloud auth login    # only if not already authenticated
+export PATH="/opt/homebrew/share/google-cloud-sdk/bin:$PATH"   # gke-gcloud-auth-plugin, required by kubectl for GKE auth
+gcloud container clusters get-credentials ucp-agent-cluster --region=asia-northeast1 --project=sub-gcp-ucp-clsd-sandbox
+```
+**Verify:**
+```sh
+kubectl config current-context
+# expect: gke_sub-gcp-ucp-clsd-sandbox_asia-northeast1_ucp-agent-cluster
+kubectl get nodes
+# expect: system-pool nodes listed, Ready
+```
+If `kubectl get nodes` hangs or errors with an auth-plugin message, the `PATH` export above
+didn't take — `gke-gcloud-auth-plugin` has to be on `PATH` for every shell that runs `kubectl`
+against a GKE cluster, not just the one that ran `get-credentials`.
+
+### 3. Colima profiles running
+
+Two separate profiles are used — don't conflate them, they host different things:
+
+```sh
+colima start ucp-crossplane   # hosts the eaas-standin docker-compose stack (Step 1)
+colima start default          # the pre-existing Temporal/Crossplane cluster (Steps 5-6)
+```
+If a profile doesn't already exist on your machine, `colima start <profile>` creates one with
+default specs — to match what this PoC was actually run against, create them explicitly instead:
+```sh
+colima start ucp-crossplane --cpu 2 --memory 4 --kubernetes
+colima start default --cpu 4 --memory 8 --kubernetes
+```
+
+**Verify:**
+```sh
+colima list
+# expect: both `ucp-crossplane` and `default` show STATUS "Running"
+kubectl --context colima get pods -A | grep -E "temporal|crossplane"
+# expect: real temporal-system and crossplane-system pods, Running — this is what Steps 5-6 ship logs from
+```
+
+### 4. Docker context — the gotcha to know about up front
+
+Colima switches the **active Docker context** to whichever profile you started most recently.
+`docker compose up -d` (Step 1) attaches to whatever context is currently active — if you start
+`default` *after* `ucp-crossplane`, `docker compose` in Step 1 will silently try to run against
+the wrong Colima VM.
+
+**Verify before Step 1:**
+```sh
+docker context ls
+# expect: the line with a "*" next to it is "colima-ucp-crossplane" — if it's "colima" (the
+# default profile) instead, run: docker context use colima-ucp-crossplane
 ```
 
 ## Files
