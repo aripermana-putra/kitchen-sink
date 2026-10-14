@@ -61,3 +61,33 @@ variant: assertor_aud_array=true token_scope="openid profile rns:roc:lbaas"
   [proxy token] GET /v2/tenants -> 500
       body: {"message":"Internal Server Error"}
       X-Request-Id: ia-v2-XV9EpSpkRYqO4gYfGZgyUjbfYR
+######## D: assertor aud = lbaas + caas
+variant: assertor_aud=[rns:roc:lbaas rns:roc:caas] assertor_aud_array=false token_scope=""
+== 2. Token exchange (proxy)
+  status: 401
+  body:   {"error":"invalid_client","error_description":"client authentication failed"}
+fatal: proxy returned 401
+######## E: assertor aud = caas only
+variant: assertor_aud=[rns:roc:caas] assertor_aud_array=false token_scope=""
+== 2. Token exchange (proxy)
+  status: 200
+  token_type=Bearer expires_in=600
+== 3. Access token decode
+  iss=https://qa2-accounts-onecloud.rakuten-it.com/auth/realms/roc
+  aud=rns:roc:caas
+  azp=rns:roc:iam
+  sub=a857021f-bc27-3708-9f59-20a4fd5dd9e1
+  email=ucp-cli-auth@clsd-ucp.iam.service-accounts.roc
+  iat=1.791963204e+09
+  exp=1.791963804e+09
+  groups=[rns:roc:caas::clsd-ucp:roles:admin]
+  other claim names: [typ jti email_verified]
+== 5. LBaaS call with proxy token
+  [proxy token] GET /v2/tenants -> 403
+      body: 
+######## F: assertor aud = lbaas (bare)
+variant: assertor_aud=[lbaas] assertor_aud_array=false token_scope=""
+== 2. Token exchange (proxy)
+  status: 400
+  body:   {"error":"invalid_target","error_description":"unknown audience"}
+fatal: proxy returned 400

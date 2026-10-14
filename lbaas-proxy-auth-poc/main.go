@@ -49,7 +49,7 @@ func client(insecure bool) *http.Client {
 	}
 }
 
-func signAssertor(jwkPath, account string, audArray bool) (string, error) {
+func signAssertor(jwkPath, account string, auds []string, audArray bool) (string, error) {
 	raw, err := os.ReadFile(jwkPath)
 	if err != nil {
 		return "", err
@@ -78,8 +78,10 @@ func signAssertor(jwkPath, account string, audArray bool) (string, error) {
 		"iat": now.Unix(), "exp": now.Add(assertorTTL).Unix(),
 		"jti": fmt.Sprintf("%x", jti),
 	}
-	if audArray {
-		claims["aud"] = []string{assertorAud}
+	if audArray || len(auds) > 1 {
+		claims["aud"] = auds
+	} else {
+		claims["aud"] = auds[0]
 	}
 	h, _ := json.Marshal(header)
 	c, _ := json.Marshal(claims)
@@ -220,11 +222,12 @@ func main() {
 	c := client(insecure)
 	audArray := env("ASSERTOR_AUD_ARRAY", "false") == "true"
 	scope := os.Getenv("TOKEN_SCOPE")
+	auds := strings.Split(env("ASSERTOR_AUD", assertorAud), ",")
 	controls := env("CONTROLS", "true") == "true"
-	fmt.Printf("variant: assertor_aud_array=%v token_scope=%q\n", audArray, scope)
+	fmt.Printf("variant: assertor_aud=%v assertor_aud_array=%v token_scope=%q\n", auds, audArray, scope)
 
 	fmt.Println("== 1. Sign assertor")
-	assertion, err := signAssertor(jwkPath, account, audArray)
+	assertion, err := signAssertor(jwkPath, account, auds, audArray)
 	must(err)
 	h, cl, _ := decodeJWT(assertion)
 	fmt.Printf("  header=%v\n  claims=%v\n", h, cl)
