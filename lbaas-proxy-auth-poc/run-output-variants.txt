@@ -1,0 +1,63 @@
+######## A: assertor aud as array
+variant: assertor_aud_array=true token_scope=""
+== 1. Sign assertor
+== 2. Token exchange (proxy)
+  status: 200
+  token_type=Bearer expires_in=43200
+== 3. Access token decode
+  iss=https://qa2-accounts-onecloud.rakuten-it.com/auth/realms/roc
+  aud=rns:roc:lbaas
+  azp=rns:roc:iam
+  sub=a857021f-bc27-3708-9f59-20a4fd5dd9e1
+  email=ucp-cli-auth@clsd-ucp.iam.service-accounts.roc
+  iat=1.791962389e+09
+  exp=1.792005589e+09
+  groups=[rns:roc:lbaas::clsd-ucp:roles:lbaas-operator rns:roc:lbaas::clsd-ucp:roles:lbaas-viewer]
+  other claim names: [jti typ email_verified]
+== 4. Issuer checks
+== 5. LBaaS call with proxy token
+  [proxy token] GET /v2/tenants -> 500
+      body: {"message":"Internal Server Error"}
+      X-Request-Id: ia-v2-OZLf4J3T70T5qIQcJ8hF7AL1qo
+######## B: scope requested
+variant: assertor_aud_array=false token_scope="openid profile rns:roc:lbaas"
+== 1. Sign assertor
+== 2. Token exchange (proxy)
+  status: 200
+  token_type=Bearer expires_in=43200
+== 3. Access token decode
+  iss=https://qa2-accounts-onecloud.rakuten-it.com/auth/realms/roc
+  aud=rns:roc:lbaas
+  azp=rns:roc:iam
+  sub=a857021f-bc27-3708-9f59-20a4fd5dd9e1
+  email=ucp-cli-auth@clsd-ucp.iam.service-accounts.roc
+  iat=1.791962389e+09
+  exp=1.792005589e+09
+  groups=[rns:roc:lbaas::clsd-ucp:roles:lbaas-operator rns:roc:lbaas::clsd-ucp:roles:lbaas-viewer]
+  other claim names: [typ email_verified jti]
+== 4. Issuer checks
+== 5. LBaaS call with proxy token
+  [proxy token] GET /v2/tenants -> 500
+      body: {"message":"Internal Server Error"}
+      X-Request-Id: ia-v2-cYcJYPOv4dXP89OofofQVlP3Mz
+######## C: both
+variant: assertor_aud_array=true token_scope="openid profile rns:roc:lbaas"
+== 1. Sign assertor
+== 2. Token exchange (proxy)
+  status: 200
+  token_type=Bearer expires_in=43200
+== 3. Access token decode
+  iss=https://qa2-accounts-onecloud.rakuten-it.com/auth/realms/roc
+  aud=rns:roc:lbaas
+  azp=rns:roc:iam
+  sub=a857021f-bc27-3708-9f59-20a4fd5dd9e1
+  email=ucp-cli-auth@clsd-ucp.iam.service-accounts.roc
+  iat=1.791962389e+09
+  exp=1.792005589e+09
+  groups=[rns:roc:lbaas::clsd-ucp:roles:lbaas-operator rns:roc:lbaas::clsd-ucp:roles:lbaas-viewer]
+  other claim names: [email_verified typ jti]
+== 4. Issuer checks
+== 5. LBaaS call with proxy token
+  [proxy token] GET /v2/tenants -> 500
+      body: {"message":"Internal Server Error"}
+      X-Request-Id: ia-v2-XV9EpSpkRYqO4gYfGZgyUjbfYR

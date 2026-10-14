@@ -1,0 +1,67 @@
+== 1. Sign assertor
+  header=map[alg:EdDSA kid:c0LKTTGI8DpZ0RSxc__wyhMLxXQnP1yDzp358rUs27I]
+  claims=map[aud:rns:roc:lbaas exp:1.79196187e+09 iat:1.79196185e+09 iss:ucp-cli-auth@clsd-ucp.iam.service-accounts.roc jti:1ff7d751e358ef84feeabd00ad5ed96a sub:ucp-cli-auth@clsd-ucp.iam.service-accounts.roc]
+== 2. Token exchange (proxy)
+  status: 200
+  token_type=Bearer expires_in=43200
+== 3. Access token decode
+  header=map[alg:RS256 kid:HxkuVHFNiGutY_C5iXe2GR8uPvviXrGCuunxKyKPHRc typ:JWT]
+  iss=https://qa2-accounts-onecloud.rakuten-it.com/auth/realms/roc
+  aud=rns:roc:lbaas
+  azp=rns:roc:iam
+  sub=a857021f-bc27-3708-9f59-20a4fd5dd9e1
+  email=ucp-cli-auth@clsd-ucp.iam.service-accounts.roc
+  iat=1.79196185e+09
+  exp=1.79200505e+09
+  groups=[rns:roc:lbaas::clsd-ucp:roles:lbaas-operator rns:roc:lbaas::clsd-ucp:roles:lbaas-viewer]
+  other claim names: [typ jti email_verified]
+== 4. Issuer checks
+  [iss as issued] DNS qa2-accounts-onecloud.rakuten-it.com -> [100.95.60.125]
+  [iss as issued] discovery https://qa2-accounts-onecloud.rakuten-it.com/auth/realms/roc/.well-known/openid-configuration -> 200
+      issuer=https://qa2-accounts-onecloud.rakuten-it.com/auth/realms/roc jwks_uri=https://qa2-accounts-onecloud.rakuten-it.com/auth/realms/roc/protocol/openid-connect/certs
+      jwks -> 200
+== 5. LBaaS call with proxy token
+  [proxy token] GET /v2/tenants -> 500
+      body: {"message":"Internal Server Error"}
+      X-Request-Id: ia-v2-f6mXd3E5CIkw2WVplcJgtKov6p
+== 6. Controls
+  [no token] GET /v2/tenants -> 200
+      body: <!DOCTYPE html>
+<html class="login-pf">
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <meta name="robots" content="noindex, nofollow">
+
+            <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <title>Log in</title>
+    <link rel="icon" href="/auth/resources/6bd1503/login/roc/img/favicon.ico" />
+         ...
+  [malformed token] GET /v2/tenants -> 200
+      body: <!DOCTYPE html>
+<html class="login-pf">
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <meta name="robots" content="noindex, nofollow">
+
+            <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <title>Log in</title>
+    <link rel="icon" href="/auth/resources/6bd1503/login/roc/img/favicon.ico" />
+         ...
+  [bad signature] GET /v2/tenants -> 403
+      body: 
+  [proxy token, other path] GET / -> 500
+      body: {"message":"Internal Server Error"}
+      X-Request-Id: ia-v2-cTpJUx1EglfMqsN01MMfJjBnz8
+  [proxy token, other path] GET /v2 -> 500
+      body: {"message":"Internal Server Error"}
+      X-Request-Id: ia-v2-pCWso0iAzDSmIcFY0rfBP0maww
+  [proxy token, other path] GET /v2/health -> 500
+      body: {"message":"Internal Server Error"}
+      X-Request-Id: ia-v2-cPHY05poQvGOx9tUKKNkWPvOoK
+  [proxy token, other path] GET /healthz -> 500
+      body: {"message":"Internal Server Error"}
+      X-Request-Id: ia-v2-8xgaQTDVC6sJymNFyFWYwxLgn0
