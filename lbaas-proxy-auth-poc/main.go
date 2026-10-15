@@ -24,6 +24,7 @@ const (
 	assertorTTL     = 20 * time.Second
 	httpTimeout     = 20 * time.Second
 	maxBodyPrint    = 400
+	tokenFileMode   = 0o600
 )
 
 var b64 = base64.RawURLEncoding
@@ -236,6 +237,10 @@ func main() {
 	fmt.Println("== 2. Token exchange (proxy)")
 	token, err := exchange(c, proxyURL, assertion, scope)
 	must(err)
+
+	if out := os.Getenv("TOKEN_OUT"); out != "" {
+		must(os.WriteFile(out, []byte(token), tokenFileMode))
+	}
 
 	fmt.Println("== 3. Access token decode")
 	th, tc, err := decodeJWT(token)

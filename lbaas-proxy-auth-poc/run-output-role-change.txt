@@ -1,0 +1,36 @@
+Role-change test, 2026-10-15, LBaaS v3 QA (https://qa-jpe2-user-dlb.r-local.net), service account ucp-cli-auth, proxy tokens (aud=[rns:roc:lbaas], azp=rns:roc:iam, expires_in=43200).
+Probe: DELETE /v3/tenants/clsd-ucp/acl_rules/<random nonexistent name> (404 = authorized, rule does not exist; 403 = not authorized). No rule exists with that name; nothing is deleted.
+Tokens are not recorded in this file.
+
+######## Step 1 baseline, both roles (before any change)
+now (UTC): 2026-10-15 01:30:40
+  iat=1.79202784e+09
+  groups=[rns:roc:lbaas::clsd-ucp:roles:lbaas-operator rns:roc:lbaas::clsd-ucp:roles:lbaas-viewer]
+  GET /v2/tenants -> 200   X-Request-Id: ia-v2-Wqd9V0DAOmC9pNbotSvvKwCuZT
+  GET /v3/version -> 200   X-Request-Id: ia-v3-qwfN5myDtDi72CJjqBumXhS68f
+  GET /v3/tenants -> 200   X-Request-Id: ia-v3-UzKEKME5tovoZ8e6V1QU92T0lb
+
+######## lbaas-viewer removed from the service account
+now (UTC): 2026-10-15 01:31:45
+  iat=1.792027905e+09
+  groups=[rns:roc:lbaas::clsd-ucp:roles:lbaas-operator]
+  GET /v2/tenants -> 200   X-Request-Id: ia-v2-26Ko7QUzbSIg7F77w2RrlOEvc0
+  GET /v3/version -> 200   X-Request-Id: ia-v3-Z0ObRkdqt2PUk8jczySg3FPZjT
+  GET /v3/tenants -> 200   X-Request-Id: ia-v3-4a3D6Jdv5gvtCokHBVu1fZqMz9
+
+######## Step 2 baseline, token saved as "old token" (both roles restored)
+now (UTC): 2026-10-15 01:33:01
+  iat=1.792027983e+09
+  groups=[rns:roc:lbaas::clsd-ucp:roles:lbaas-operator rns:roc:lbaas::clsd-ucp:roles:lbaas-viewer]
+  GET /v3/tenants -> 200
+  probe (old token) -> 404 {"message":"Not Found"}   X-Request-Id: ia-v3-hrKk6dehsKkGr9lmyNKeaUlHw5
+
+######## lbaas-operator removed from the service account (lbaas-viewer kept)
+now (UTC): 2026-10-15 01:34:10
+1. NEW token minted after the removal
+  iat=1.792028051e+09
+  groups=[rns:roc:lbaas::clsd-ucp:roles:lbaas-viewer]
+  GET /v3/tenants -> 403
+2. probe with NEW token -> 403 {"message":"Forbidden"}
+3. probe with OLD token -> 404 {"message":"Not Found"}   X-Request-Id: ia-v3-LNjniv8Y70CUfTqtrNc0s7chx6
+4. GET /v3/tenants: OLD token -> 200, NEW token -> 403
