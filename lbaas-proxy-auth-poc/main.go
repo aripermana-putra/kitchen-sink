@@ -218,6 +218,7 @@ func main() {
 	account := env("SA_ACCOUNT", defaultAccount)
 	proxyURL := env("PROXY_TOKEN_URL", defaultProxyURL)
 	lbaas := strings.TrimSuffix(env("LBAAS_BASE_URL", defaultLBaaSURL), "/")
+	lbaasV3 := strings.TrimSuffix(env("LBAAS_V3_BASE_URL", lbaas), "/")
 	insecure := env("TLS_INSECURE", "true") == "true"
 	c := client(insecure)
 	audArray := env("ASSERTOR_AUD_ARRAY", "false") == "true"
@@ -262,6 +263,10 @@ func main() {
 
 	fmt.Println("== 5. LBaaS call with proxy token")
 	callLBaaS(c, "proxy token", lbaas, "/v2/tenants", token)
+
+	fmt.Println("== 5b. LBaaS v3 call with proxy token")
+	callLBaaS(c, "proxy token v3", lbaasV3, "/v3/version", token)
+	callLBaaS(c, "proxy token v3", lbaasV3, "/v3/tenants", token)
 
 	if !controls {
 		return

@@ -91,3 +91,55 @@ variant: assertor_aud=[lbaas] assertor_aud_array=false token_scope=""
   status: 400
   body:   {"error":"invalid_target","error_description":"unknown audience"}
 fatal: proxy returned 400
+######## G: v3 endpoint on qa2-lbaas host
+variant: assertor_aud=[rns:roc:lbaas] assertor_aud_array=false token_scope=""
+== 2. Token exchange (proxy)
+  status: 200
+  token_type=Bearer expires_in=43200
+== 3. Access token decode
+  iss=https://qa2-accounts-onecloud.rakuten-it.com/auth/realms/roc
+  aud=[rns:roc:lbaas]
+  azp=rns:roc:iam
+  sub=a857021f-bc27-3708-9f59-20a4fd5dd9e1
+  email=ucp-cli-auth@clsd-ucp.iam.service-accounts.roc
+  iat=1.792024054e+09
+  exp=1.792067254e+09
+  groups=[rns:roc:lbaas::clsd-ucp:roles:lbaas-operator rns:roc:lbaas::clsd-ucp:roles:lbaas-viewer]
+  other claim names: [typ jti email_verified]
+== 5. LBaaS call with proxy token
+  [proxy token] GET /v2/tenants -> 200
+      body: [{"name":"clsd-ucp","quotas":{"load_balancers":10,"listeners":50,"redirect_rules":50,"forwarding_rules":50,"rewrite_rules":50,"server_groups":100,"global_server_groups":0,"gslb":20,"acl_rules_source_ips":50,"acl_rules_source_ip6s":50},"usage":{"load_balancers":0,"listeners":0,"redirect_rules":0,"forwarding_rules":0,"rewrite_rules":0,"server_groups":0,"global_server_groups":0,"gslb":0,"acl_rules_so...
+      X-Request-Id: ia-v2-lNeWJ8YiogqGOGgVKTwkmfBhE3
+== 5b. LBaaS v3 call with proxy token
+  [proxy token v3] GET /v3/tenants -> 404
+      body: {"message":"Not Found"}
+      X-Request-Id: ia-v2-QGaRWKaaf0LzAhsHWuNeGHdag7
+######## H: v3 endpoint on jpw2-user-dlb host
+variant: assertor_aud=[rns:roc:lbaas] assertor_aud_array=false token_scope=""
+  status: 200
+  aud=[rns:roc:lbaas]
+  azp=rns:roc:iam
+== 5. LBaaS call with proxy token
+  [proxy token] GET /v2/tenants -> 200
+      body: [{"name":"clsd-ucp","quotas":{"load_balancers":10,"listeners":50,"redirect_rules":50,"forwarding_rules":50,"rewrite_rules":50,"server_groups":100,"global_server_groups":0,"gslb":20,"acl_rules_source_ips":50,"acl_rules_source_ip6s":50},"usage":{"load_balancers":0,"listeners":0,"redirect_rules":0,"forwarding_rules":0,"rewrite_rules":0,"server_groups":0,"global_server_groups":0,"gslb":0,"acl_rules_so...
+      X-Request-Id: ia-v2-PedaAI9LbK94PlBtrITQPU6Lw2
+== 5b. LBaaS v3 call with proxy token
+  [proxy token v3] GET /v3/tenants -> 401
+      body: {"message":"Failed to authenticate: invalid auth token"}
+      Www-Authenticate: Bearer realm="LBaaS"
+######## I: v3 endpoints on qa-jpe2-user-dlb host
+variant: assertor_aud=[rns:roc:lbaas] assertor_aud_array=false token_scope=""
+  status: 200
+  aud=[rns:roc:lbaas]
+  azp=rns:roc:iam
+== 5. LBaaS call with proxy token
+  [proxy token] GET /v2/tenants -> 200
+      body: [{"name":"clsd-ucp","quotas":{"load_balancers":10,"listeners":50,"redirect_rules":50,"forwarding_rules":50,"rewrite_rules":50,"server_groups":100,"global_server_groups":0,"gslb":20,"acl_rules_source_ips":50,"acl_rules_source_ip6s":50},"usage":{"load_balancers":0,"listeners":0,"redirect_rules":0,"forwarding_rules":0,"rewrite_rules":0,"server_groups":0,"global_server_groups":0,"gslb":0,"acl_rules_so...
+      X-Request-Id: ia-v2-uknyO9diR3dt9GKVr14dGoQjXp
+== 5b. LBaaS v3 call with proxy token
+  [proxy token v3] GET /v3/version -> 200
+      body: {"is_fallback":false,"version":"v3.2.7","binary_file_hash":"cbd2600b224f51ebb85a1f4a5b373d0eb6896c4c895c176c0a08cf7809bfc709","cassandra_keyspace":"lbaas_jpe2","operator":"ansible","deployment_date":"2026-09-10 23:43:14","api_region":"jpe2"}
+      X-Request-Id: ia-v3-6mUQSIoQw88KX6pwCRF3mbJ06Q
+  [proxy token v3] GET /v3/tenants -> 200
+      body: [{"name":"clsd-ucp","region_usage_list":["jpe1","jpe2"],"quotas":{"load_balancers":10,"listeners":50,"redirect_rules":50,"forwarding_rules":50,"rewrite_rules":50,"server_groups":100,"global_server_groups":0,"gslb":20,"acl_rules_source_ips":50,"acl_rules_source_ip6s":50},"usage":{"load_balancers":4,"listeners":4,"redirect_rules":0,"forwarding_rules":0,"rewrite_rules":0,"server_groups":4,"global_ser...
+      X-Request-Id: ia-v3-KcI67t7U8UeJV6Ijj5ANvPD5GU
