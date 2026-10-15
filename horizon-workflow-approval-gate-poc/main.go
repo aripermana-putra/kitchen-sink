@@ -8,20 +8,29 @@
 // Two modes:
 //
 //   - MODE=test (default): drives a test workflow via the tenant-scoped
-//     test-workflows endpoints. Requires no publishing and no real
-//     tenant-admin/team-admin role propagation, but never appears in the
-//     OneCloud Portal.
+//     test-workflows endpoints. Requires no publishing, but never appears in
+//     the OneCloud Portal and sends no notifications.
 //   - MODE=production: publishes the definition draft and creates a real
 //     production workflow, then drives it via the ABAC-scoped /jobs
 //     resource — the same resource the OneCloud Portal's Approvals/My
-//     Requests tabs are backed by, and the one a UCP-native interface
-//     (e.g. a CLI) would call directly instead of requiring a Portal login.
+//     Requests tabs are backed by.
 //
 // Three scenarios (SCENARIO env var), applicable to both modes:
 //
-//   - happy (default): approve layer 1, then approve layer 2.
+//   - happy (default): approve layer 1, then complete layer 2.
 //   - reject-layer1: reject at layer 1; layer 2 must never be reached.
 //   - cancel-layer1: cancel at layer 1; layer 2 must never be reached.
+//
+// Optional definition features (VARIANT env var, comma separated):
+//
+//   - vlan: layer 2 is skipped when the request carries params.vlan (set VLAN).
+//   - service-role: layer 1 uses a service_resource_role user group
+//     (UCP_SERVICE_RNS, UCP_RESOURCE_RNS, UCP_ROLE) instead of the tenant kind.
+//   - user-groups: layer 1 uses one user group per email in APPROVER_EMAILS
+//     (5 slots; "none" supplies an empty list), backed up by TEAM_NAME.
+//   - email: an email callback node notifies APPROVER_EMAILS before layer 1.
+//   - no-successful: the approve path ends in Completed, so no path sets the
+//     Successful outcome.
 //
 // The resume callback (Part B) is deferred — see
 // docs/projects/universal-control-plane-ucp/pocs/horizon-workflow-approval-gate/design.md
@@ -33,25 +42,36 @@
 //	KEYCLOAK_CLIENT_ID=rns:roc:portal \
 //	WORKFLOW_BASE_URL=https://qa-horizon-workflow-api.r-local.net \
 //	TENANT_RNS=rns:roc:iam::<your-tenant> \
-//	MODE=production \
-//	SCENARIO=happy \
+//	MODE=production SCENARIO=happy VARIANT=vlan,email \
 //	go run .
 //
 // Optional:
 //
+//	TOKEN (bearer token; skips the interactive login and the Keycloak settings)
 //	KIND_ID (default: ucp_poc_vm_creation_approval)
 //	TEAM_NAME (default: clsd-ucp-team)
+//	VLAN (value supplied at creation; empty means not supplied)
+//	RESOURCE_ID (default: poc-vm-001; appears in the custom email subject)
+//	APPROVER_EMAILS (comma separated; default: the operator)
+//	UCP_SERVICE_RNS (default: rns:roc:ucp), UCP_ROLE (default: test-admin),
+//	UCP_RESOURCE_RNS (default: empty)
 package main
 
 import (
 	"bufio"
 	"fmt"
 	"os"
+	"strings"
+	"time"
+)
+
+const (
+	completeVLAN   = "poc-vlan-100"
+	settleAttempts = 15
+	settleInterval = time.Second
 )
 
 func main() {
-	issuer := requireEnv("KEYCLOAK_ISSUER")
-	clientID := requireEnv("KEYCLOAK_CLIENT_ID")
 	workflowBaseURL := requireEnv("WORKFLOW_BASE_URL")
 	tenantRNS := requireEnv("TENANT_RNS")
 
@@ -59,6 +79,7 @@ func main() {
 	teamName := envOr("TEAM_NAME", "clsd-ucp-team")
 	mode := envOr("MODE", "test")
 	scenario := envOr("SCENARIO", "happy")
+	variants := parseVariants(os.Getenv("VARIANT"))
 
 	layer1Action, ok := map[string]string{
 		"happy":         "approve",
@@ -73,18 +94,22 @@ func main() {
 	}
 
 	fmt.Println("=== Horizon Workflow Approval Gate PoC (MCUCP-304) ===")
-	fmt.Printf("tenant_rns=%s kind_id=%s team=%s mode=%s scenario=%s\n\n", tenantRNS, kindID, teamName, mode, scenario)
+	fmt.Printf("tenant_rns=%s kind_id=%s team=%s mode=%s scenario=%s variant=%v\n\n", tenantRNS, kindID, teamName, mode, scenario, keys(variants))
 
-	fmt.Println("--- Login ---")
-	token, err := login(issuer, clientID)
-	if err != nil {
-		fatalf("login failed: %v", err)
+	token := os.Getenv("TOKEN")
+	if token == "" {
+		fmt.Println("--- Login ---")
+		var err error
+		token, err = login(requireEnv("KEYCLOAK_ISSUER"), requireEnv("KEYCLOAK_CLIENT_ID"))
+		if err != nil {
+			fatalf("login failed: %v", err)
+		}
 	}
 	email, err := emailFromToken(token)
 	if err != nil {
 		fatalf("read email from token: %v", err)
 	}
-	fmt.Printf("login ok (%s)\n", email)
+	fmt.Printf("operator: %s\n", email)
 
 	client := newWorkflowClient(workflowBaseURL, token)
 
@@ -93,8 +118,26 @@ func main() {
 		fatalf("create workflow kind: %v", err)
 	}
 
+	layer1Groups := []any{tenantAdminGroup()}
+	switch {
+	case variants["service-role"]:
+		layer1Groups = []any{serviceResourceRoleGroup(
+			envOr("UCP_SERVICE_RNS", "rns:roc:ucp"),
+			os.Getenv("UCP_RESOURCE_RNS"),
+			envOr("UCP_ROLE", "test-admin"),
+		)}
+	case variants["user-groups"]:
+		layer1Groups = emailUserGroups(teamGroup(teamName))
+	}
+
 	fmt.Println("\n--- Create definition draft ---")
-	definition := buildDefinition(teamName)
+	definition := buildDefinition(definitionOptions{
+		teamName:           teamName,
+		layer1Groups:       layer1Groups,
+		conditionalNetwork: variants["vlan"],
+		emailNotify:        variants["email"],
+		noSuccessful:       variants["no-successful"],
+	})
 	draftNumber, err := client.createDefinitionDraft(tenantRNS, kindID, definition)
 	if err != nil {
 		fatalf("create definition draft: %v", err)
@@ -102,19 +145,22 @@ func main() {
 	fmt.Printf("definition draft number: %d\n", draftNumber)
 
 	params := map[string]any{
-		"tenant_rns":    tenantRNS,
-		"resource_type": "vm",
-		"resource_id":   "poc-vm-001",
+		"tenant_rns":      tenantRNS,
+		"resource_type":   "vm",
+		"resource_id":     envOr("RESOURCE_ID", "poc-vm-001"),
+		"approver_emails": approverEmails(envOr("APPROVER_EMAILS", email)),
+	}
+	if v := os.Getenv("VLAN"); v != "" {
+		params["vlan"] = v
 	}
 
 	// act and status are mode-specific: test workflows use the
 	// tenant-scoped test-workflows endpoints, production workflows use the
 	// ABAC-scoped /jobs resource. Everything below this point is written
-	// once against these two function values rather than duplicated per
-	// mode.
+	// once against these function values rather than duplicated per mode.
 	var (
 		workflowID string
-		act        func(action string) error
+		act        func(action string, payload map[string]any) error
 		status     func() testWorkflowDetail
 		final      func()
 	)
@@ -133,15 +179,16 @@ func main() {
 			fatalf("create production workflow: %v", err)
 		}
 		fmt.Printf("production workflow id: %s\n", workflowID)
-		fmt.Println("Production workflows process automatically — no equivalent of `process` for test workflows is needed.")
 
-		act = func(action string) error {
-			// map[string]any{} rather than nil: a nil map here is a
+		act = func(action string, payload map[string]any) error {
+			// A non-nil empty map rather than nil: a nil map here is a
 			// typed-nil interface value (non-nil to workflowClient.do's
 			// nil check), which marshals to the JSON literal `null` — the
-			// API rejects that with WF0001 "Field required", since it
-			// wants an object body, even an empty one.
-			return client.triggerJobAction(workflowID, action, map[string]any{})
+			// API rejects that with WF0001 "Field required".
+			if payload == nil {
+				payload = map[string]any{}
+			}
+			return client.triggerJobAction(workflowID, action, payload)
 		}
 		status = func() testWorkflowDetail {
 			wf, err := client.getJob(workflowID)
@@ -152,10 +199,6 @@ func main() {
 		}
 		final = func() {
 			fmt.Println("\n--- Visibility check: GET /jobs filtered to this operator ---")
-			fmt.Println("(mirrors what a UCP-native interface would call instead of the OneCloud Portal)")
-			if err := client.listJobs(map[string]string{"created_by": email}); err != nil {
-				fmt.Printf("warning: could not list jobs by created_by: %v\n", err)
-			}
 			if err := client.listJobs(map[string]string{"approver": email}); err != nil {
 				fmt.Printf("warning: could not list jobs by approver: %v\n", err)
 			}
@@ -168,23 +211,17 @@ func main() {
 		}
 		fmt.Printf("test workflow id: %s\n", workflowID)
 
-		// process only advances a workflow through automated nodes
-		// (callback, adapter) up to the next step or terminal node. Our
-		// definition has no automated nodes at all — every hop after
-		// "start" requires a human trigger — so process is only
-		// meaningful once, right here, to move off "start". Calling it
-		// again after a trigger returns WF0050 ("Workflow has an active
-		// step") because there's nothing automated left to do; the
-		// trigger itself already performed the transition.
+		// process advances a test workflow through automated nodes
+		// (callbacks, adapters) up to the next step or terminal node. It is
+		// only valid here, right after creation; calling it again while a
+		// step is active returns WF0050.
 		fmt.Println("\n--- Process test workflow (advance from start) ---")
-		actionStatus, err := client.processTestWorkflow(tenantRNS, kindID, workflowID)
-		if err != nil {
+		if _, err := client.processTestWorkflow(tenantRNS, kindID, workflowID); err != nil {
 			fatalf("process test workflow: %v", err)
 		}
-		fmt.Printf("action status: %s (acknowledges the process request; fetching overall state next)\n", actionStatus)
 
-		act = func(action string) error {
-			return client.triggerTestWorkflow(tenantRNS, kindID, workflowID, action)
+		act = func(action string, payload map[string]any) error {
+			return client.triggerTestWorkflow(tenantRNS, kindID, workflowID, action, payload)
 		}
 		status = func() testWorkflowDetail {
 			wf, err := client.getTestWorkflow(tenantRNS, kindID, workflowID)
@@ -200,39 +237,83 @@ func main() {
 		}
 	}
 
-	wf := status()
+	wf := settled(status)
 	fmt.Printf("execution_status: %s\n", wf.ExecutionStatus)
-
-	pause(fmt.Sprintf("About to trigger layer 1: %s. Press Enter to continue.", layer1Action))
 
 	fmt.Printf("\n--- Trigger layer 1: %s ---\n", layer1Action)
-	if err := act(layer1Action); err != nil {
+	if err := act(layer1Action, nil); err != nil {
 		fatalf("trigger layer 1 %s: %v", layer1Action, err)
 	}
-	wf = status()
+	wf = settled(status)
 	fmt.Printf("execution_status: %s\n", wf.ExecutionStatus)
 
-	if layer1Action != "approve" {
+	if layer1Action != "approve" || wf.ExecutionStatus == "completed" {
 		fmt.Println("\n--- Final state ---")
 		final()
-		fmt.Printf("\nExpected result: execution_status completed, workflow at 'end' with an outcome matching layer 1's action (%s) — layer 2 (%s) must never have been exposed an action.\n", layer1Action, teamName)
+		fmt.Println("\nWorkflow finished after layer 1 (layer 1 did not approve, or layer 2 was skipped).")
 		return
 	}
 
-	pause(fmt.Sprintf("Layer 1 approved. The workflow should now be sitting at network_team_approval. Press Enter to trigger layer 2 (%s) approval.", teamName))
-
-	fmt.Println("\n--- Trigger layer 2: approve ---")
-	if err := act("approve"); err != nil {
-		fatalf("trigger layer 2 approve: %v", err)
+	layer2Action, layer2Payload := "approve", map[string]any(nil)
+	if variants["vlan"] {
+		layer2Action, layer2Payload = "complete", map[string]any{"vlan": completeVLAN}
 	}
-	wf = status()
+	fmt.Printf("\n--- Trigger layer 2: %s ---\n", layer2Action)
+	if err := act(layer2Action, layer2Payload); err != nil {
+		fatalf("trigger layer 2 %s: %v", layer2Action, err)
+	}
+	wf = settled(status)
 	fmt.Printf("execution_status: %s\n", wf.ExecutionStatus)
 
 	fmt.Println("\n--- Final state ---")
 	final()
-	fmt.Println("\nExpected result: execution_status completed, workflow at 'end' with outcome Successful.")
 }
 
+// settled polls status until the workflow leaves "processing": transitions
+// are applied asynchronously, so a read right after an action can be stale.
+func settled(status func() testWorkflowDetail) testWorkflowDetail {
+	wf := status()
+	for i := 0; i < settleAttempts && wf.ExecutionStatus == "processing"; i++ {
+		time.Sleep(settleInterval)
+		wf = status()
+	}
+	return wf
+}
+
+func parseVariants(raw string) map[string]bool {
+	out := map[string]bool{}
+	for _, v := range strings.Split(raw, ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			out[v] = true
+		}
+	}
+	return out
+}
+
+func keys(m map[string]bool) []string {
+	out := []string{}
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+// approverEmails splits a comma separated list; the literal "none" yields an
+// empty list, for exercising the empty-approver case.
+func approverEmails(raw string) []any {
+	out := []any{}
+	if raw == "none" {
+		return out
+	}
+	for _, e := range strings.Split(raw, ",") {
+		if e = strings.TrimSpace(e); e != "" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// pause is kept for interactive runs that want a checkpoint.
 func pause(message string) {
 	fmt.Printf("\n%s\n", message)
 	_, _ = bufio.NewReader(os.Stdin).ReadString('\n')

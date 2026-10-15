@@ -1,0 +1,11 @@
+clsd-ucp-qa4 workflow 1xHFKs-wLyaV5ggCDTUNUUO HTTP 200
+  states: {'current': 'UCP tenant admin approval', 'result': None} | exec: waiting
+  steps: 1 | notes: []
+  triggers: [] | user_triggers: [{'required': True, 'trigger': 'approve', 'allowed': False, 'payload_schema': {'$schema': 'https://json-schema.org/draft/2020-12/schema', 'title': 'Approve'}, 'notes': []}, {'required': True, 'trigger': 'cancel', 'allowed': True, 'payload_schema': {'$schema': 'https://json-schema.org/draft/2020-12/schema', 'title': 'Cancel'}, 'notes': []}, {'required': True, 'trigger': 'reject', 'allowed': False, 'payload_schema': {'$schema': 'https://json-schema.org/draft/2020-12/schema', 'title': 'Reject'}, 'notes': []}]
+
+cleanup
+ cancel 1xHFKr-zlkiOlAC0stv9qPz 200
+ cancel 1xHFKs-wLyaV5ggCDTUNUUO 200
+ delete kind   204
+ delete secret 200
+ delete config 200

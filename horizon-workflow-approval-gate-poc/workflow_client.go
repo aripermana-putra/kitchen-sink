@@ -176,8 +176,12 @@ func (c *workflowClient) getTestWorkflow(tenantRNS, kindID, workflowID string) (
 // (TestWorkflowTriggerPayload): {"trigger": string, "parameters"?: object,
 // "as_user"?: UserImpersonationPayload}. This PoC only uses "trigger" since
 // the operator acts as themselves for both approval layers (see design doc).
-func (c *workflowClient) triggerTestWorkflow(tenantRNS, kindID, workflowID, trigger string) error {
-	body := map[string]string{"trigger": trigger}
+// parameters is sent as the trigger payload when non-empty.
+func (c *workflowClient) triggerTestWorkflow(tenantRNS, kindID, workflowID, trigger string, parameters map[string]any) error {
+	body := map[string]any{"trigger": trigger}
+	if len(parameters) > 0 {
+		body["parameters"] = parameters
+	}
 	path := fmt.Sprintf("/workflow-sapi/2/tenants/%s/kinds/%s/test-workflows/%s/triggers", tenantRNS, kindID, workflowID)
 	_, err := c.do(http.MethodPost, path, body, nil)
 	return err

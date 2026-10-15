@@ -1,0 +1,19 @@
+secret -> 200
+config -> 201
+kind (role test-admin) -> 200
+
+-- users/sync
+   clsd-ucp: HTTP 200 -> ['aripermana.putra@rakuten.com']
+   clsd-ucp-qa4: HTTP 400 -> WF0062
+   iam: HTTP 400 -> WF0062
+
+-- production workflows (definition version 22 )
+   create clsd-ucp 202 1xHFKr-zlkiOlAC0stv9qPz
+   create clsd-ucp-qa4 202 1xHFKs-wLyaV5ggCDTUNUUO
+
+== clsd-ucp 1xHFKr-zlkiOlAC0stv9qPz
+   approve groups: [('ROC tenant clsd-ucp Custom User Group tenant-ucp-admins', ['aripermana.putra@rakuten.com'])]
+   operator allowed: [('approve', True), ('cancel', True), ('reject', True)] | notes: []
+Traceback (most recent call last):
+  File "<stdin>", line 36, in <module>
+IndexError: list index out of range

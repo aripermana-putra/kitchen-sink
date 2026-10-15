@@ -1,0 +1,23 @@
+register kind -> 200
+draft 201 28
+publish 200 version 22
+create workflow for clsd-ucp -> 202 1xHFGp-0OMlnCJNsAMWCXIz
+create workflow for clsd-ucp-qa4 -> 202 1xHFGq-UL02X6JRLCUvUcPZ
+
+== workflow 1xHFGp-0OMlnCJNsAMWCXIz (tenant_name=clsd-ucp)
+   group id: rns:roc:iam::clsd-ucp/tenant-ucp-admins/tenant=clsd-ucp
+   title: ROC tenant clsd-ucp Custom User Group tenant-ucp-admins
+   5 approvers: ['aripermana.putra@rakuten.com', 'govind.madhu@rakuten.com', 'krishna.chalwetkar@rakuten.com', 'ucp-cli-auth@clsd-ucp.iam.service-accounts.roc', 'yusuke.a.ohashi@rakuten.com']
+   user_triggers: [('approve', True), ('cancel', True), ('reject', True)] | notes: []
+
+== workflow 1xHFGq-UL02X6JRLCUvUcPZ (tenant_name=clsd-ucp-qa4)
+   group id: rns:roc:iam::clsd-ucp/tenant-ucp-admins/tenant=clsd-ucp-qa4
+   title: ROC tenant clsd-ucp Custom User Group tenant-ucp-admins
+   9 approvers: ['aripermana.putra@rakuten.com', 'aya.wang@rakuten.com', 'govind.madhu@rakuten.com', 'krishna.chalwetkar@rakuten.com', 'ryo.kimura@rakuten.com', 'sebasti.bellefeuille@rakuten.com', 'test.ucp16@qa-accounts.roc', 'test.ucp20@qa-accounts.roc', 'yusuke.a.ohashi@rakuten.com']
+   user_triggers: [('approve', True), ('cancel', True), ('reject', True)] | notes: []
+
+cancel 1xHFGp-0OMlnCJNsAMWCXIz 200
+cancel 1xHFGq-UL02X6JRLCUvUcPZ 200
+delete kind   204
+delete secret 200
+delete config 200

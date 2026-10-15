@@ -1,0 +1,17 @@
+secret -> 200
+config -> 201
+kind (role test-admin) -> 200
+create workflow for clsd-ucp-qa4 -> 202 1xHFUL-BBO7I1whcQP8PP5a
+polled 2x; steps=1 exec=waiting states={'current': 'UCP tenant admin approval', 'result': None}
+step users: []
+triggers_users:
+   approve: [('ROC tenant clsd-ucp Custom User Group tenant-ucp-admins', [])]
+   cancel: [('User aripermana.putra@rakuten.com', ['aripermana.putra@rakuten.com'])]
+   reject: [('ROC tenant clsd-ucp Custom User Group tenant-ucp-admins', [])]
+operator allowed: [('approve', False), ('cancel', True), ('reject', False)] | notes: []
+
+cleanup
+ cancel 1xHFUL-BBO7I1whcQP8PP5a 200
+ delete kind   204
+ delete secret 200
+ delete config 200
