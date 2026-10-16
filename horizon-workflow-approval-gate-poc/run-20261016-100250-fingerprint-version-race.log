@@ -1,0 +1,1103 @@
+=== Horizon Workflow Approval Gate PoC (MCUCP-304) ===
+tenant_rns=rns:roc:iam::clsd-ucp kind_id=ucp_poc_vm_creation_approval team=clsd-ucp-team mode=production scenario=happy variant=[fingerprint user-groups]
+
+operator: aripermana.putra@rakuten.com
+
+--- Register Workflow kind (idempotent — ok if it already exists) ---
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds
+{
+  "description": "PoC for MCUCP-304: two-layer approval gate",
+  "id": "ucp_poc_vm_creation_approval",
+  "name": "UCP PoC VM Creation Approval"
+}
+<-- 409
+{"errors":[{"code":"WF0032","message":"Resource conflict.","detailedMessage":"A \"kind\" resource with the id \"ucp_poc_vm_creation_approval\" already exists.","metadata":{"resource_type":"kind","resource_id":"ucp_poc_vm_creation_approval"}}]}
+
+kind already exists — continuing (id/name are globally unique, so a prior run likely created it)
+
+--- Create definition draft ---
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/definitions
+{
+  "definition": {
+    "fingerprint_fields": [
+      "resource_type",
+      "resource_id",
+      "tenant_name"
+    ],
+    "nodes": {
+      "end": {
+        "kind": "end",
+        "name": "Completed"
+      },
+      "network_team_approval": {
+        "kind": "step",
+        "name": "Network team approval",
+        "step_kind": "network_team_approval",
+        "triggers": {
+          "approve": {
+            "payload": {
+              "title": "Approve"
+            },
+            "users": [
+              {
+                "kind": "team",
+                "role": "admins",
+                "team": "clsd-ucp-team"
+              }
+            ]
+          },
+          "cancel": {
+            "payload": {
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "title": "Cancel",
+              "type": "object"
+            },
+            "users": [
+              {
+                "kind": "user",
+                "user": "{{ created_by }}"
+              }
+            ]
+          },
+          "reject": {
+            "payload": {
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "title": "Reject",
+              "type": "object"
+            },
+            "users": [
+              {
+                "kind": "team",
+                "role": "admins",
+                "team": "clsd-ucp-team"
+              }
+            ]
+          }
+        }
+      },
+      "start": {
+        "kind": "start",
+        "name": "Started"
+      },
+      "tenant_admin_approval": {
+        "kind": "step",
+        "name": "Submitting tenant admin approval",
+        "step_kind": "tenant_admin_approval",
+        "triggers": {
+          "approve": {
+            "payload": {
+              "title": "Approve"
+            },
+            "users": [
+              {
+                "backup_spec": {
+                  "kind": "team",
+                  "role": "admins",
+                  "team": "clsd-ucp-team"
+                },
+                "kind": "user",
+                "user": "{{ params.approver_emails[0] if params.approver_emails | length \u003e 0 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[1] if params.approver_emails | length \u003e 1 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[2] if params.approver_emails | length \u003e 2 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[3] if params.approver_emails | length \u003e 3 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[4] if params.approver_emails | length \u003e 4 }}"
+              }
+            ]
+          },
+          "cancel": {
+            "payload": {
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "title": "Cancel",
+              "type": "object"
+            },
+            "users": [
+              {
+                "kind": "user",
+                "user": "{{ created_by }}"
+              }
+            ]
+          },
+          "reject": {
+            "payload": {
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "title": "Reject",
+              "type": "object"
+            },
+            "users": [
+              {
+                "backup_spec": {
+                  "kind": "team",
+                  "role": "admins",
+                  "team": "clsd-ucp-team"
+                },
+                "kind": "user",
+                "user": "{{ params.approver_emails[0] if params.approver_emails | length \u003e 0 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[1] if params.approver_emails | length \u003e 1 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[2] if params.approver_emails | length \u003e 2 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[3] if params.approver_emails | length \u003e 3 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[4] if params.approver_emails | length \u003e 4 }}"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "payload_schema": {
+      "properties": {
+        "approver_emails": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "resource_id": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        },
+        "tenant_name": {
+          "type": "string"
+        },
+        "tenant_rns": {
+          "type": "string"
+        },
+        "vlan": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tenant_rns"
+      ],
+      "type": "object"
+    },
+    "transitions": [
+      {
+        "condition": "approve",
+        "source": "tenant_admin_approval",
+        "target": "network_team_approval"
+      },
+      {
+        "condition": "reject",
+        "result": "Rejected",
+        "source": "tenant_admin_approval",
+        "target": "end"
+      },
+      {
+        "condition": "cancel",
+        "result": "Canceled",
+        "source": "tenant_admin_approval",
+        "target": "end"
+      },
+      {
+        "condition": "approve",
+        "result": "Successful",
+        "source": "network_team_approval",
+        "target": "end"
+      },
+      {
+        "condition": "reject",
+        "result": "Rejected",
+        "source": "network_team_approval",
+        "target": "end"
+      },
+      {
+        "condition": "cancel",
+        "result": "Canceled",
+        "source": "network_team_approval",
+        "target": "end"
+      },
+      {
+        "source": "start",
+        "target": "tenant_admin_approval"
+      }
+    ]
+  }
+}
+<-- 201
+{"kind":"ucp_poc_vm_creation_approval","number":31,"version_major":null,"published":false,"published_at":null,"published_by":null,"created_at":"2026-10-16T01:02:52.060545Z","created_by":"aripermana.putra@rakuten.com","updated_at":null,"updated_by":null,"update_number":0,"disabled":true,"definition":{"nodes":{"end":{"kind":"end","name":"Completed"},"network_team_approval":{"kind":"step","name":"Network team approval","step_kind":"network_team_approval","triggers":{"approve":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Approve"},"users":[{"kind":"team","team":"clsd-ucp-team","role":"admins"}],"notes":[],"adapter_only":false},"cancel":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Cancel","type":"object"},"users":[{"kind":"user","user":"{{ created_by }}"}],"notes":[],"adapter_only":false},"reject":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"kind":"team","team":"clsd-ucp-team","role":"admins"}],"notes":[],"adapter_only":false}},"skip_if":null,"skip_with":null,"skipped_label":null,"adapters":[]},"start":{"kind":"start","name":"Started"},"tenant_admin_approval":{"kind":"step","name":"Submitting tenant admin approval","step_kind":"tenant_admin_approval","triggers":{"approve":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Approve"},"users":[{"backup_spec":{"kind":"team","team":"clsd-ucp-team","role":"admins"},"kind":"user","user":"{{ params.approver_emails[0] if params.approver_emails | length > 0 }}"},{"kind":"user","user":"{{ params.approver_emails[1] if params.approver_emails | length > 1 }}"},{"kind":"user","user":"{{ params.approver_emails[2] if params.approver_emails | length > 2 }}"},{"kind":"user","user":"{{ params.approver_emails[3] if params.approver_emails | length > 3 }}"},{"kind":"user","user":"{{ params.approver_emails[4] if params.approver_emails | length > 4 }}"}],"notes":[],"adapter_only":false},"cancel":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Cancel","type":"object"},"users":[{"kind":"user","user":"{{ created_by }}"}],"notes":[],"adapter_only":false},"reject":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"backup_spec":{"kind":"team","team":"clsd-ucp-team","role":"admins"},"kind":"user","user":"{{ params.approver_emails[0] if params.approver_emails | length > 0 }}"},{"kind":"user","user":"{{ params.approver_emails[1] if params.approver_emails | length > 1 }}"},{"kind":"user","user":"{{ params.approver_emails[2] if params.approver_emails | length > 2 }}"},{"kind":"user","user":"{{ params.approver_emails[3] if params.approver_emails | length > 3 }}"},{"kind":"user","user":"{{ params.approver_emails[4] if params.approver_emails | length > 4 }}"}],"notes":[],"adapter_only":false}},"skip_if":null,"skip_with":null,"skipped_label":null,"adapters":[]}},"transitions":[{"source":"tenant_admin_approval","target":"network_team_approval","condition":"approve","result":null},{"source":"tenant_admin_approval","target":"end","condition":"reject","result":"Rejected"},{"source":"tenant_admin_approval","target":"end","condition":"cancel","result":"Canceled"},{"source":"network_team_approval","target":"end","condition":"approve","result":"Successful"},{"source":"network_team_approval","target":"end","condition":"reject","result":"Rejected"},{"source":"network_team_approval","target":"end","condition":"cancel","result":"Canceled"},{"source":"start","target":"tenant_admin_approval","condition":null,"result":null}],"payload_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"approver_emails":{"items":{"type":"string"},"type":"array"},"reason":{"type":"string"},"resource_id":{"type":"string"},"resource_type":{"type":"string"},"tenant_name":{"type":"string"},"tenant_rns":{"type":"string"},"vlan":{"type":"string"}},"required":["tenant_rns"],"type":"object"},"view":null,"fingerprint_fields":["resource_type","resource_id","tenant_name"],"viewers":[]},"builder_meta":null}
+
+definition draft number: 31
+
+--- Publish definition draft ---
+--> PUT /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/definitions/31/publish
+<-- 200
+{"kind":"ucp_poc_vm_creation_approval","number":31,"version_major":25,"published":true,"published_at":"2026-10-16T01:02:52.459175Z","published_by":"aripermana.putra@rakuten.com","created_at":"2026-10-16T01:02:52.060545Z","created_by":"aripermana.putra@rakuten.com","updated_at":"2026-10-16T01:02:52.459175Z","updated_by":"aripermana.putra@rakuten.com","update_number":0,"disabled":false,"definition":{"nodes":{"end":{"kind":"end","name":"Completed"},"network_team_approval":{"kind":"step","name":"Network team approval","step_kind":"network_team_approval","triggers":{"approve":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Approve"},"users":[{"kind":"team","team":"clsd-ucp-team","role":"admins"}],"notes":[],"adapter_only":false},"cancel":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Cancel","type":"object"},"users":[{"kind":"user","user":"{{ created_by }}"}],"notes":[],"adapter_only":false},"reject":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"kind":"team","team":"clsd-ucp-team","role":"admins"}],"notes":[],"adapter_only":false}},"skip_if":null,"skip_with":null,"skipped_label":null,"adapters":[]},"start":{"kind":"start","name":"Started"},"tenant_admin_approval":{"kind":"step","name":"Submitting tenant admin approval","step_kind":"tenant_admin_approval","triggers":{"approve":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Approve"},"users":[{"backup_spec":{"kind":"team","team":"clsd-ucp-team","role":"admins"},"kind":"user","user":"{{ params.approver_emails[0] if params.approver_emails | length > 0 }}"},{"kind":"user","user":"{{ params.approver_emails[1] if params.approver_emails | length > 1 }}"},{"kind":"user","user":"{{ params.approver_emails[2] if params.approver_emails | length > 2 }}"},{"kind":"user","user":"{{ params.approver_emails[3] if params.approver_emails | length > 3 }}"},{"kind":"user","user":"{{ params.approver_emails[4] if params.approver_emails | length > 4 }}"}],"notes":[],"adapter_only":false},"cancel":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Cancel","type":"object"},"users":[{"kind":"user","user":"{{ created_by }}"}],"notes":[],"adapter_only":false},"reject":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"backup_spec":{"kind":"team","team":"clsd-ucp-team","role":"admins"},"kind":"user","user":"{{ params.approver_emails[0] if params.approver_emails | length > 0 }}"},{"kind":"user","user":"{{ params.approver_emails[1] if params.approver_emails | length > 1 }}"},{"kind":"user","user":"{{ params.approver_emails[2] if params.approver_emails | length > 2 }}"},{"kind":"user","user":"{{ params.approver_emails[3] if params.approver_emails | length > 3 }}"},{"kind":"user","user":"{{ params.approver_emails[4] if params.approver_emails | length > 4 }}"}],"notes":[],"adapter_only":false}},"skip_if":null,"skip_with":null,"skipped_label":null,"adapters":[]}},"transitions":[{"source":"tenant_admin_approval","target":"network_team_approval","condition":"approve","result":null},{"source":"tenant_admin_approval","target":"end","condition":"reject","result":"Rejected"},{"source":"tenant_admin_approval","target":"end","condition":"cancel","result":"Canceled"},{"source":"network_team_approval","target":"end","condition":"approve","result":"Successful"},{"source":"network_team_approval","target":"end","condition":"reject","result":"Rejected"},{"source":"network_team_approval","target":"end","condition":"cancel","result":"Canceled"},{"source":"start","target":"tenant_admin_approval","condition":null,"result":null}],"payload_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"approver_emails":{"items":{"type":"string"},"type":"array"},"reason":{"type":"string"},"resource_id":{"type":"string"},"resource_type":{"type":"string"},"tenant_name":{"type":"string"},"tenant_rns":{"type":"string"},"vlan":{"type":"string"}},"required":["tenant_rns"],"type":"object"},"view":null,"fingerprint_fields":["resource_type","resource_id","tenant_name"],"viewers":[]},"builder_meta":null}
+
+published version: 25
+
+--- B first workflow ---
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/25/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp2-vm-20261016-100250",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 202
+{"workflow_id":"1xHWLU-c1K6Y7Jh09CJQZSN","job_id":"1xHWLU-c1K6Y7Jh09CJQZSN","status":"pending"}
+
+RESULT B first workflow: created 1xHWLU-c1K6Y7Jh09CJQZSN
+
+--- C same payload while first is active ---
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/25/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp2-vm-20261016-100250",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 409
+{"errors":[{"code":"WF0011","message":"An active workflow with the same fingerprint exists.","detailedMessage":"The active workflow 1xHWLU-c1K6Y7Jh09CJQZSN has the same fingerprint.","metadata":{"workflow_id":"1xHWLU-c1K6Y7Jh09CJQZSN","fingerprint":{"resource_type":"vm","resource_id":"fp2-vm-20261016-100250","tenant_name":"clsd-ucp"}}}]}
+
+RESULT C same payload while first is active: refused: POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/25/workflows returned 409: {"errors":[{"code":"WF0011","message":"An active workflow with the same fingerprint exists.","detailedMessage":"The active workflow 1xHWLU-c1K6Y7Jh09CJQZSN has the same fingerprint.","metadata":{"workflow_id":"1xHWLU-c1K6Y7Jh09CJQZSN","fingerprint":{"resource_type":"vm","resource_id":"fp2-vm-20261016-100250","tenant_name":"clsd-ucp"}}}]}
+
+--- E different resource_id ---
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/25/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp2-vm-20261016-100250-other",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 202
+{"workflow_id":"1xHWLW-2Ky24A7UrWcK6aNK","job_id":"1xHWLW-2Ky24A7UrWcK6aNK","status":"pending"}
+
+RESULT E different resource_id: created 1xHWLW-2Ky24A7UrWcK6aNK
+
+--- F missing fingerprint field tenant_name ---
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/25/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp2-vm-20261016-100250",
+    "resource_type": "vm",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 400
+{"errors":[{"code":"WF0040","message":"Missing part of the fingerprint.","detailedMessage":"Missing part of the fingerprint for the workflow kind \"ucp_poc_vm_creation_approval\", which is comprised of the fields: resource_id,resource_type,tenant_name","metadata":{"workflow_kind":"ucp_poc_vm_creation_approval","fingerprint_fields":["resource_type","resource_id","tenant_name"]}}]}
+
+RESULT F missing fingerprint field tenant_name: refused: POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/25/workflows returned 400: {"errors":[{"code":"WF0040","message":"Missing part of the fingerprint.","detailedMessage":"Missing part of the fingerprint for the workflow kind \"ucp_poc_vm_creation_approval\", which is comprised of the fields: resource_id,resource_type,tenant_name","metadata":{"workflow_kind":"ucp_poc_vm_creation_approval","fingerprint_fields":["resource_type","resource_id","tenant_name"]}}]}
+--> POST /workflow-sapi/2/jobs/1xHWLU-c1K6Y7Jh09CJQZSN/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWLU-c1K6Y7Jh09CJQZSN","job_id":"1xHWLU-c1K6Y7Jh09CJQZSN","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWLW-2Ky24A7UrWcK6aNK/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWLW-2Ky24A7UrWcK6aNK","job_id":"1xHWLW-2Ky24A7UrWcK6aNK","status":"success"}
+
+
+--- D same payload after first is cancelled ---
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/25/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp2-vm-20261016-100250",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 202
+{"workflow_id":"1xHWLb-f4OXkFK0AzLOCZjd","job_id":"1xHWLb-f4OXkFK0AzLOCZjd","status":"pending"}
+
+RESULT D same payload after first is cancelled: created 1xHWLb-f4OXkFK0AzLOCZjd
+--> POST /workflow-sapi/2/jobs/1xHWLb-f4OXkFK0AzLOCZjd/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLb-f4OXkFK0AzLOCZjd/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWLb-f4OXkFK0AzLOCZjd","job_id":"1xHWLb-f4OXkFK0AzLOCZjd","status":"success"}
+
+
+--- G1 workflow on version 25 ---
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/25/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp2-vm-20261016-100250-xver",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 202
+{"workflow_id":"1xHWLf-Yk6Dd6V96OyyBsE1","job_id":"1xHWLf-Yk6Dd6V96OyyBsE1","status":"pending"}
+
+RESULT G1 workflow on version 25: created 1xHWLf-Yk6Dd6V96OyyBsE1
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/definitions
+{
+  "definition": {
+    "fingerprint_fields": [
+      "resource_type",
+      "resource_id",
+      "tenant_name"
+    ],
+    "nodes": {
+      "end": {
+        "kind": "end",
+        "name": "Completed"
+      },
+      "network_team_approval": {
+        "kind": "step",
+        "name": "Network team approval",
+        "step_kind": "network_team_approval",
+        "triggers": {
+          "approve": {
+            "payload": {
+              "title": "Approve"
+            },
+            "users": [
+              {
+                "kind": "team",
+                "role": "admins",
+                "team": "clsd-ucp-team"
+              }
+            ]
+          },
+          "cancel": {
+            "payload": {
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "title": "Cancel",
+              "type": "object"
+            },
+            "users": [
+              {
+                "kind": "user",
+                "user": "{{ created_by }}"
+              }
+            ]
+          },
+          "reject": {
+            "payload": {
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "title": "Reject",
+              "type": "object"
+            },
+            "users": [
+              {
+                "kind": "team",
+                "role": "admins",
+                "team": "clsd-ucp-team"
+              }
+            ]
+          }
+        }
+      },
+      "start": {
+        "kind": "start",
+        "name": "Started"
+      },
+      "tenant_admin_approval": {
+        "kind": "step",
+        "name": "Submitting tenant admin approval",
+        "step_kind": "tenant_admin_approval",
+        "triggers": {
+          "approve": {
+            "payload": {
+              "title": "Approve"
+            },
+            "users": [
+              {
+                "backup_spec": {
+                  "kind": "team",
+                  "role": "admins",
+                  "team": "clsd-ucp-team"
+                },
+                "kind": "user",
+                "user": "{{ params.approver_emails[0] if params.approver_emails | length \u003e 0 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[1] if params.approver_emails | length \u003e 1 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[2] if params.approver_emails | length \u003e 2 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[3] if params.approver_emails | length \u003e 3 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[4] if params.approver_emails | length \u003e 4 }}"
+              }
+            ]
+          },
+          "cancel": {
+            "payload": {
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "title": "Cancel",
+              "type": "object"
+            },
+            "users": [
+              {
+                "kind": "user",
+                "user": "{{ created_by }}"
+              }
+            ]
+          },
+          "reject": {
+            "payload": {
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "title": "Reject",
+              "type": "object"
+            },
+            "users": [
+              {
+                "backup_spec": {
+                  "kind": "team",
+                  "role": "admins",
+                  "team": "clsd-ucp-team"
+                },
+                "kind": "user",
+                "user": "{{ params.approver_emails[0] if params.approver_emails | length \u003e 0 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[1] if params.approver_emails | length \u003e 1 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[2] if params.approver_emails | length \u003e 2 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[3] if params.approver_emails | length \u003e 3 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[4] if params.approver_emails | length \u003e 4 }}"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "payload_schema": {
+      "properties": {
+        "approver_emails": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "resource_id": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        },
+        "tenant_name": {
+          "type": "string"
+        },
+        "tenant_rns": {
+          "type": "string"
+        },
+        "vlan": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tenant_rns"
+      ],
+      "type": "object"
+    },
+    "transitions": [
+      {
+        "condition": "approve",
+        "source": "tenant_admin_approval",
+        "target": "network_team_approval"
+      },
+      {
+        "condition": "reject",
+        "result": "Rejected",
+        "source": "tenant_admin_approval",
+        "target": "end"
+      },
+      {
+        "condition": "cancel",
+        "result": "Canceled",
+        "source": "tenant_admin_approval",
+        "target": "end"
+      },
+      {
+        "condition": "approve",
+        "result": "Successful",
+        "source": "network_team_approval",
+        "target": "end"
+      },
+      {
+        "condition": "reject",
+        "result": "Rejected",
+        "source": "network_team_approval",
+        "target": "end"
+      },
+      {
+        "condition": "cancel",
+        "result": "Canceled",
+        "source": "network_team_approval",
+        "target": "end"
+      },
+      {
+        "source": "start",
+        "target": "tenant_admin_approval"
+      }
+    ]
+  }
+}
+<-- 201
+{"kind":"ucp_poc_vm_creation_approval","number":32,"version_major":null,"published":false,"published_at":null,"published_by":null,"created_at":"2026-10-16T01:03:05.008492Z","created_by":"aripermana.putra@rakuten.com","updated_at":null,"updated_by":null,"update_number":0,"disabled":true,"definition":{"nodes":{"end":{"kind":"end","name":"Completed"},"network_team_approval":{"kind":"step","name":"Network team approval","step_kind":"network_team_approval","triggers":{"approve":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Approve"},"users":[{"kind":"team","team":"clsd-ucp-team","role":"admins"}],"notes":[],"adapter_only":false},"cancel":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Cancel","type":"object"},"users":[{"kind":"user","user":"{{ created_by }}"}],"notes":[],"adapter_only":false},"reject":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"kind":"team","team":"clsd-ucp-team","role":"admins"}],"notes":[],"adapter_only":false}},"skip_if":null,"skip_with":null,"skipped_label":null,"adapters":[]},"start":{"kind":"start","name":"Started"},"tenant_admin_approval":{"kind":"step","name":"Submitting tenant admin approval","step_kind":"tenant_admin_approval","triggers":{"approve":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Approve"},"users":[{"backup_spec":{"kind":"team","team":"clsd-ucp-team","role":"admins"},"kind":"user","user":"{{ params.approver_emails[0] if params.approver_emails | length > 0 }}"},{"kind":"user","user":"{{ params.approver_emails[1] if params.approver_emails | length > 1 }}"},{"kind":"user","user":"{{ params.approver_emails[2] if params.approver_emails | length > 2 }}"},{"kind":"user","user":"{{ params.approver_emails[3] if params.approver_emails | length > 3 }}"},{"kind":"user","user":"{{ params.approver_emails[4] if params.approver_emails | length > 4 }}"}],"notes":[],"adapter_only":false},"cancel":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Cancel","type":"object"},"users":[{"kind":"user","user":"{{ created_by }}"}],"notes":[],"adapter_only":false},"reject":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"backup_spec":{"kind":"team","team":"clsd-ucp-team","role":"admins"},"kind":"user","user":"{{ params.approver_emails[0] if params.approver_emails | length > 0 }}"},{"kind":"user","user":"{{ params.approver_emails[1] if params.approver_emails | length > 1 }}"},{"kind":"user","user":"{{ params.approver_emails[2] if params.approver_emails | length > 2 }}"},{"kind":"user","user":"{{ params.approver_emails[3] if params.approver_emails | length > 3 }}"},{"kind":"user","user":"{{ params.approver_emails[4] if params.approver_emails | length > 4 }}"}],"notes":[],"adapter_only":false}},"skip_if":null,"skip_with":null,"skipped_label":null,"adapters":[]}},"transitions":[{"source":"tenant_admin_approval","target":"network_team_approval","condition":"approve","result":null},{"source":"tenant_admin_approval","target":"end","condition":"reject","result":"Rejected"},{"source":"tenant_admin_approval","target":"end","condition":"cancel","result":"Canceled"},{"source":"network_team_approval","target":"end","condition":"approve","result":"Successful"},{"source":"network_team_approval","target":"end","condition":"reject","result":"Rejected"},{"source":"network_team_approval","target":"end","condition":"cancel","result":"Canceled"},{"source":"start","target":"tenant_admin_approval","condition":null,"result":null}],"payload_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"approver_emails":{"items":{"type":"string"},"type":"array"},"reason":{"type":"string"},"resource_id":{"type":"string"},"resource_type":{"type":"string"},"tenant_name":{"type":"string"},"tenant_rns":{"type":"string"},"vlan":{"type":"string"}},"required":["tenant_rns"],"type":"object"},"view":null,"fingerprint_fields":["resource_type","resource_id","tenant_name"],"viewers":[]},"builder_meta":null}
+
+--> PUT /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/definitions/32/publish
+<-- 200
+{"kind":"ucp_poc_vm_creation_approval","number":32,"version_major":26,"published":true,"published_at":"2026-10-16T01:03:05.470150Z","published_by":"aripermana.putra@rakuten.com","created_at":"2026-10-16T01:03:05.008492Z","created_by":"aripermana.putra@rakuten.com","updated_at":"2026-10-16T01:03:05.470150Z","updated_by":"aripermana.putra@rakuten.com","update_number":0,"disabled":false,"definition":{"nodes":{"end":{"kind":"end","name":"Completed"},"network_team_approval":{"kind":"step","name":"Network team approval","step_kind":"network_team_approval","triggers":{"approve":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Approve"},"users":[{"kind":"team","team":"clsd-ucp-team","role":"admins"}],"notes":[],"adapter_only":false},"cancel":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Cancel","type":"object"},"users":[{"kind":"user","user":"{{ created_by }}"}],"notes":[],"adapter_only":false},"reject":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"kind":"team","team":"clsd-ucp-team","role":"admins"}],"notes":[],"adapter_only":false}},"skip_if":null,"skip_with":null,"skipped_label":null,"adapters":[]},"start":{"kind":"start","name":"Started"},"tenant_admin_approval":{"kind":"step","name":"Submitting tenant admin approval","step_kind":"tenant_admin_approval","triggers":{"approve":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Approve"},"users":[{"backup_spec":{"kind":"team","team":"clsd-ucp-team","role":"admins"},"kind":"user","user":"{{ params.approver_emails[0] if params.approver_emails | length > 0 }}"},{"kind":"user","user":"{{ params.approver_emails[1] if params.approver_emails | length > 1 }}"},{"kind":"user","user":"{{ params.approver_emails[2] if params.approver_emails | length > 2 }}"},{"kind":"user","user":"{{ params.approver_emails[3] if params.approver_emails | length > 3 }}"},{"kind":"user","user":"{{ params.approver_emails[4] if params.approver_emails | length > 4 }}"}],"notes":[],"adapter_only":false},"cancel":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Cancel","type":"object"},"users":[{"kind":"user","user":"{{ created_by }}"}],"notes":[],"adapter_only":false},"reject":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"backup_spec":{"kind":"team","team":"clsd-ucp-team","role":"admins"},"kind":"user","user":"{{ params.approver_emails[0] if params.approver_emails | length > 0 }}"},{"kind":"user","user":"{{ params.approver_emails[1] if params.approver_emails | length > 1 }}"},{"kind":"user","user":"{{ params.approver_emails[2] if params.approver_emails | length > 2 }}"},{"kind":"user","user":"{{ params.approver_emails[3] if params.approver_emails | length > 3 }}"},{"kind":"user","user":"{{ params.approver_emails[4] if params.approver_emails | length > 4 }}"}],"notes":[],"adapter_only":false}},"skip_if":null,"skip_with":null,"skipped_label":null,"adapters":[]}},"transitions":[{"source":"tenant_admin_approval","target":"network_team_approval","condition":"approve","result":null},{"source":"tenant_admin_approval","target":"end","condition":"reject","result":"Rejected"},{"source":"tenant_admin_approval","target":"end","condition":"cancel","result":"Canceled"},{"source":"network_team_approval","target":"end","condition":"approve","result":"Successful"},{"source":"network_team_approval","target":"end","condition":"reject","result":"Rejected"},{"source":"network_team_approval","target":"end","condition":"cancel","result":"Canceled"},{"source":"start","target":"tenant_admin_approval","condition":null,"result":null}],"payload_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"approver_emails":{"items":{"type":"string"},"type":"array"},"reason":{"type":"string"},"resource_id":{"type":"string"},"resource_type":{"type":"string"},"tenant_name":{"type":"string"},"tenant_rns":{"type":"string"},"vlan":{"type":"string"}},"required":["tenant_rns"],"type":"object"},"view":null,"fingerprint_fields":["resource_type","resource_id","tenant_name"],"viewers":[]},"builder_meta":null}
+
+
+--- G2 same payload on newer version 26 while version 25 workflow is active ---
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/26/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp2-vm-20261016-100250-xver",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 409
+{"errors":[{"code":"WF0011","message":"An active workflow with the same fingerprint exists.","detailedMessage":"The active workflow 1xHWLf-Yk6Dd6V96OyyBsE1 has the same fingerprint.","metadata":{"workflow_id":"1xHWLf-Yk6Dd6V96OyyBsE1","fingerprint":{"resource_type":"vm","resource_id":"fp2-vm-20261016-100250-xver","tenant_name":"clsd-ucp"}}}]}
+
+RESULT G2 same payload on newer version 26 while version 25 workflow is active: refused: POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/26/workflows returned 409: {"errors":[{"code":"WF0011","message":"An active workflow with the same fingerprint exists.","detailedMessage":"The active workflow 1xHWLf-Yk6Dd6V96OyyBsE1 has the same fingerprint.","metadata":{"workflow_id":"1xHWLf-Yk6Dd6V96OyyBsE1","fingerprint":{"resource_type":"vm","resource_id":"fp2-vm-20261016-100250-xver","tenant_name":"clsd-ucp"}}}]}
+--> POST /workflow-sapi/2/jobs/1xHWLf-Yk6Dd6V96OyyBsE1/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWLf-Yk6Dd6V96OyyBsE1","job_id":"1xHWLf-Yk6Dd6V96OyyBsE1","status":"success"}
+
+
+--- H 5 simultaneous creations of one payload ---
+
+--- H5 ---
+
+--- H2 ---
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/26/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp2-vm-20261016-100250-race",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+
+--- H1 ---
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/26/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp2-vm-20261016-100250-race",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+
+--- H3 ---
+
+--- H4 ---
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/26/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp2-vm-20261016-100250-race",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/26/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp2-vm-20261016-100250-race",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/26/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp2-vm-20261016-100250-race",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 202
+{"workflow_id":"1xHWLj-2Ir4DmxjTlEnYQ4Y","job_id":"1xHWLj-2Ir4DmxjTlEnYQ4Y","status":"pending"}
+
+RESULT H5: created 1xHWLj-2Ir4DmxjTlEnYQ4Y
+<-- 202
+{"workflow_id":"1xHWLj-BprY2YVG8dpgerKw","job_id":"1xHWLj-BprY2YVG8dpgerKw","status":"pending"}
+
+RESULT H4: created 1xHWLj-BprY2YVG8dpgerKw
+<-- 202
+{"workflow_id":"1xHWLj-Df3FAN3sL9eGFbw4","job_id":"1xHWLj-Df3FAN3sL9eGFbw4","status":"pending"}
+
+RESULT H1: created 1xHWLj-Df3FAN3sL9eGFbw4
+<-- 202
+{"workflow_id":"1xHWLj-Lt9pMoW011SwD6wS","job_id":"1xHWLj-Lt9pMoW011SwD6wS","status":"pending"}
+
+RESULT H2: created 1xHWLj-Lt9pMoW011SwD6wS
+<-- 202
+{"workflow_id":"1xHWLj-CPglLQKaJbLvccv6","job_id":"1xHWLj-CPglLQKaJbLvccv6","status":"pending"}
+
+RESULT H3: created 1xHWLj-CPglLQKaJbLvccv6
+--> POST /workflow-sapi/2/jobs/1xHWLU-c1K6Y7Jh09CJQZSN/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLU-c1K6Y7Jh09CJQZSN/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLU-c1K6Y7Jh09CJQZSN/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLU-c1K6Y7Jh09CJQZSN/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLU-c1K6Y7Jh09CJQZSN/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLU-c1K6Y7Jh09CJQZSN/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLU-c1K6Y7Jh09CJQZSN/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLU-c1K6Y7Jh09CJQZSN/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLU-c1K6Y7Jh09CJQZSN/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLU-c1K6Y7Jh09CJQZSN/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLU-c1K6Y7Jh09CJQZSN/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLU-c1K6Y7Jh09CJQZSN/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLU-c1K6Y7Jh09CJQZSN/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLU-c1K6Y7Jh09CJQZSN/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLU-c1K6Y7Jh09CJQZSN/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+warning: cancel 1xHWLU-c1K6Y7Jh09CJQZSN: POST /workflow-sapi/2/jobs/1xHWLU-c1K6Y7Jh09CJQZSN/cancel returned 400: {"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+--> POST /workflow-sapi/2/jobs/1xHWLW-2Ky24A7UrWcK6aNK/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLW-2Ky24A7UrWcK6aNK/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLW-2Ky24A7UrWcK6aNK/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLW-2Ky24A7UrWcK6aNK/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLW-2Ky24A7UrWcK6aNK/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLW-2Ky24A7UrWcK6aNK/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLW-2Ky24A7UrWcK6aNK/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLW-2Ky24A7UrWcK6aNK/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLW-2Ky24A7UrWcK6aNK/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLW-2Ky24A7UrWcK6aNK/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLW-2Ky24A7UrWcK6aNK/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLW-2Ky24A7UrWcK6aNK/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLW-2Ky24A7UrWcK6aNK/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLW-2Ky24A7UrWcK6aNK/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLW-2Ky24A7UrWcK6aNK/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+warning: cancel 1xHWLW-2Ky24A7UrWcK6aNK: POST /workflow-sapi/2/jobs/1xHWLW-2Ky24A7UrWcK6aNK/cancel returned 400: {"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+--> POST /workflow-sapi/2/jobs/1xHWLb-f4OXkFK0AzLOCZjd/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLb-f4OXkFK0AzLOCZjd/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLb-f4OXkFK0AzLOCZjd/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLb-f4OXkFK0AzLOCZjd/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLb-f4OXkFK0AzLOCZjd/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLb-f4OXkFK0AzLOCZjd/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLb-f4OXkFK0AzLOCZjd/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLb-f4OXkFK0AzLOCZjd/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLb-f4OXkFK0AzLOCZjd/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLb-f4OXkFK0AzLOCZjd/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLb-f4OXkFK0AzLOCZjd/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLb-f4OXkFK0AzLOCZjd/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLb-f4OXkFK0AzLOCZjd/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLb-f4OXkFK0AzLOCZjd/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLb-f4OXkFK0AzLOCZjd/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+warning: cancel 1xHWLb-f4OXkFK0AzLOCZjd: POST /workflow-sapi/2/jobs/1xHWLb-f4OXkFK0AzLOCZjd/cancel returned 400: {"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+--> POST /workflow-sapi/2/jobs/1xHWLf-Yk6Dd6V96OyyBsE1/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLf-Yk6Dd6V96OyyBsE1/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLf-Yk6Dd6V96OyyBsE1/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLf-Yk6Dd6V96OyyBsE1/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLf-Yk6Dd6V96OyyBsE1/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLf-Yk6Dd6V96OyyBsE1/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLf-Yk6Dd6V96OyyBsE1/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLf-Yk6Dd6V96OyyBsE1/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLf-Yk6Dd6V96OyyBsE1/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLf-Yk6Dd6V96OyyBsE1/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLf-Yk6Dd6V96OyyBsE1/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLf-Yk6Dd6V96OyyBsE1/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLf-Yk6Dd6V96OyyBsE1/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLf-Yk6Dd6V96OyyBsE1/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+--> POST /workflow-sapi/2/jobs/1xHWLf-Yk6Dd6V96OyyBsE1/cancel
+{}
+<-- 400
+{"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+
+warning: cancel 1xHWLf-Yk6Dd6V96OyyBsE1: POST /workflow-sapi/2/jobs/1xHWLf-Yk6Dd6V96OyyBsE1/cancel returned 400: {"errors":[{"code":"WF0010","message":"This trigger is not allowed.","detailedMessage":"The trigger cancel is not allowed.","metadata":{"trigger":"cancel","allowed_triggers":[]}}]}
+--> POST /workflow-sapi/2/jobs/1xHWLj-2Ir4DmxjTlEnYQ4Y/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWLj-2Ir4DmxjTlEnYQ4Y","job_id":"1xHWLj-2Ir4DmxjTlEnYQ4Y","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWLj-BprY2YVG8dpgerKw/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWLj-BprY2YVG8dpgerKw","job_id":"1xHWLj-BprY2YVG8dpgerKw","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWLj-Df3FAN3sL9eGFbw4/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWLj-Df3FAN3sL9eGFbw4","job_id":"1xHWLj-Df3FAN3sL9eGFbw4","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWLj-Lt9pMoW011SwD6wS/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWLj-Lt9pMoW011SwD6wS","job_id":"1xHWLj-Lt9pMoW011SwD6wS","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWLj-CPglLQKaJbLvccv6/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWLj-CPglLQKaJbLvccv6","job_id":"1xHWLj-CPglLQKaJbLvccv6","status":"success"}
+
+
+created workflows: [1xHWLU-c1K6Y7Jh09CJQZSN 1xHWLW-2Ky24A7UrWcK6aNK 1xHWLb-f4OXkFK0AzLOCZjd 1xHWLf-Yk6Dd6V96OyyBsE1 1xHWLj-2Ir4DmxjTlEnYQ4Y 1xHWLj-BprY2YVG8dpgerKw 1xHWLj-Df3FAN3sL9eGFbw4 1xHWLj-Lt9pMoW011SwD6wS 1xHWLj-CPglLQKaJbLvccv6]

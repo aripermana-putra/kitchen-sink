@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 const (
 	outcomeSuccessful = "Successful"
@@ -28,7 +31,27 @@ type definitionOptions struct {
 	// noSuccessful ends the approve path with "Completed" instead of
 	// "Successful", so that no path sets the Successful outcome.
 	noSuccessful bool
+	// fingerprint sets fingerprint_fields to fingerprintFields.
+	fingerprint bool
+	// fingerprintTypes also puts the fields of typedFingerprintFields in the
+	// fingerprint and the payload schema.
+	fingerprintTypes bool
 }
+
+// typedFingerprintFields maps a payload field to its JSON schema type; each
+// is added to the fingerprint to see how the review email renders its value.
+var typedFingerprintFields = map[string]string{
+	"quota":   "number",
+	"dry_run": "boolean",
+	"labels":  "object",
+	"tags":    "array",
+	"note":    "string",
+	"markup":  "string",
+}
+
+// fingerprintFields identify a request; reason is deliberately left out to
+// show whether non-fingerprint data reaches the email.
+var fingerprintFields = []any{"resource_type", "resource_id", "tenant_name"}
 
 // tenantAdminGroup resolves to the admins of the tenant passed as the
 // workflow's own tenant_rns parameter.
@@ -198,7 +221,7 @@ func buildDefinition(opts definitionOptions) map[string]any {
 		transitions = append(transitions, transition("start", "tenant_admin_approval", "", ""))
 	}
 
-	return map[string]any{
+	def := map[string]any{
 		"nodes":       nodes,
 		"transitions": transitions,
 		"payload_schema": map[string]any{
@@ -209,8 +232,31 @@ func buildDefinition(opts definitionOptions) map[string]any {
 				"resource_id":     map[string]any{"type": "string"},
 				"vlan":            map[string]any{"type": "string"},
 				"approver_emails": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"tenant_name":     map[string]any{"type": "string"},
+				"reason":          map[string]any{"type": "string"},
 			},
 			"required": []any{"tenant_rns"},
 		},
 	}
+	if opts.fingerprint {
+		fields := append([]any{}, fingerprintFields...)
+		if opts.fingerprintTypes {
+			props := def["payload_schema"].(map[string]any)["properties"].(map[string]any)
+			for _, name := range sortedKeys(typedFingerprintFields) {
+				fields = append(fields, name)
+				props[name] = map[string]any{"type": typedFingerprintFields[name]}
+			}
+		}
+		def["fingerprint_fields"] = fields
+	}
+	return def
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

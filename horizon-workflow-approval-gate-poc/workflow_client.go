@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // workflowClient is a thin wrapper around the Horizon Workflow API
@@ -24,6 +25,8 @@ type workflowClient struct {
 	baseURL string
 	token   string
 	http    *http.Client
+	// requestID, when set, is sent as X-Request-ID on every request.
+	requestID string
 }
 
 func newWorkflowClient(baseURL, token string) *workflowClient {
@@ -40,7 +43,11 @@ func (c *workflowClient) do(method, path string, body any, out any) (int, error)
 		if err != nil {
 			return 0, fmt.Errorf("marshal request body: %w", err)
 		}
-		fmt.Printf("--> %s %s\n%s\n", method, path, string(b))
+		shown := string(b)
+		if strings.HasSuffix(path, "/secrets") {
+			shown = `{"value": "<redacted>"}`
+		}
+		fmt.Printf("--> %s %s\n%s\n", method, path, shown)
 		reqBody = bytes.NewReader(b)
 	} else {
 		fmt.Printf("--> %s %s\n", method, path)
@@ -52,6 +59,9 @@ func (c *workflowClient) do(method, path string, body any, out any) (int, error)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
+	if c.requestID != "" {
+		req.Header.Set("X-Request-ID", c.requestID)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -128,8 +138,26 @@ type workflowActionResponse struct {
 // those are visible in the raw response that workflowClient.do already
 // prints, just not decoded into this struct.
 type testWorkflowDetail struct {
-	ID              string `json:"id"`
-	ExecutionStatus string `json:"execution_status"`
+	ID              string        `json:"id"`
+	ExecutionStatus string        `json:"execution_status"`
+	Steps           []stepDetail  `json:"steps"`
+	UserTriggers    []userTrigger `json:"user_triggers"`
+}
+
+// stepDetail holds, per trigger, the user groups the step resolved to.
+type stepDetail struct {
+	TriggersUsers map[string][]resolvedGroup `json:"triggers_users"`
+}
+
+type resolvedGroup struct {
+	Title  string   `json:"title"`
+	Emails []string `json:"emails"`
+}
+
+// userTrigger says whether the caller may fire a trigger on the current step.
+type userTrigger struct {
+	Trigger string `json:"trigger"`
+	Allowed bool   `json:"allowed"`
 }
 
 // createTestWorkflow creates a test workflow instance against the given
@@ -231,6 +259,18 @@ func (c *workflowClient) createProductionWorkflow(tenantRNS, kindID string, vers
 	var resp workflowActionResponse
 	_, err := c.do(http.MethodPost, path, body, &resp)
 	return resp.WorkflowID, err
+}
+
+// checkDuplicate asks whether an active production workflow of the kind has
+// the fingerprint these parameters would give.
+// POST /workflow-sapi/2/jobs:check-duplicate
+func (c *workflowClient) checkDuplicate(kindID string, version int, params map[string]any) (bool, error) {
+	body := map[string]any{"workflow_kind": kindID, "version": version, "parameters": params}
+	var resp struct {
+		IsDuplicate bool `json:"is_duplicate"`
+	}
+	_, err := c.do(http.MethodPost, "/workflow-sapi/2/jobs:check-duplicate", body, &resp)
+	return resp.IsDuplicate, err
 }
 
 // getJob reads the current overall state of a production workflow via the

@@ -1,0 +1,773 @@
+=== Horizon Workflow Approval Gate PoC (MCUCP-304) ===
+tenant_rns=rns:roc:iam::clsd-ucp kind_id=ucp_poc_vm_creation_approval team=clsd-ucp-team mode=production scenario=happy variant=[fingerprint-race user-groups]
+
+operator: aripermana.putra@rakuten.com
+
+--- Register Workflow kind (idempotent — ok if it already exists) ---
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds
+{
+  "description": "PoC for MCUCP-304: two-layer approval gate",
+  "id": "ucp_poc_vm_creation_approval",
+  "name": "UCP PoC VM Creation Approval"
+}
+<-- 409
+{"errors":[{"code":"WF0032","message":"Resource conflict.","detailedMessage":"A \"kind\" resource with the id \"ucp_poc_vm_creation_approval\" already exists.","metadata":{"resource_type":"kind","resource_id":"ucp_poc_vm_creation_approval"}}]}
+
+kind already exists — continuing (id/name are globally unique, so a prior run likely created it)
+
+--- Create definition draft ---
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/definitions
+{
+  "definition": {
+    "fingerprint_fields": [
+      "resource_type",
+      "resource_id",
+      "tenant_name"
+    ],
+    "nodes": {
+      "end": {
+        "kind": "end",
+        "name": "Completed"
+      },
+      "network_team_approval": {
+        "kind": "step",
+        "name": "Network team approval",
+        "step_kind": "network_team_approval",
+        "triggers": {
+          "approve": {
+            "payload": {
+              "title": "Approve"
+            },
+            "users": [
+              {
+                "kind": "team",
+                "role": "admins",
+                "team": "clsd-ucp-team"
+              }
+            ]
+          },
+          "cancel": {
+            "payload": {
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "title": "Cancel",
+              "type": "object"
+            },
+            "users": [
+              {
+                "kind": "user",
+                "user": "{{ created_by }}"
+              }
+            ]
+          },
+          "reject": {
+            "payload": {
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "title": "Reject",
+              "type": "object"
+            },
+            "users": [
+              {
+                "kind": "team",
+                "role": "admins",
+                "team": "clsd-ucp-team"
+              }
+            ]
+          }
+        }
+      },
+      "start": {
+        "kind": "start",
+        "name": "Started"
+      },
+      "tenant_admin_approval": {
+        "kind": "step",
+        "name": "Submitting tenant admin approval",
+        "step_kind": "tenant_admin_approval",
+        "triggers": {
+          "approve": {
+            "payload": {
+              "title": "Approve"
+            },
+            "users": [
+              {
+                "backup_spec": {
+                  "kind": "team",
+                  "role": "admins",
+                  "team": "clsd-ucp-team"
+                },
+                "kind": "user",
+                "user": "{{ params.approver_emails[0] if params.approver_emails | length \u003e 0 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[1] if params.approver_emails | length \u003e 1 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[2] if params.approver_emails | length \u003e 2 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[3] if params.approver_emails | length \u003e 3 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[4] if params.approver_emails | length \u003e 4 }}"
+              }
+            ]
+          },
+          "cancel": {
+            "payload": {
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "title": "Cancel",
+              "type": "object"
+            },
+            "users": [
+              {
+                "kind": "user",
+                "user": "{{ created_by }}"
+              }
+            ]
+          },
+          "reject": {
+            "payload": {
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "title": "Reject",
+              "type": "object"
+            },
+            "users": [
+              {
+                "backup_spec": {
+                  "kind": "team",
+                  "role": "admins",
+                  "team": "clsd-ucp-team"
+                },
+                "kind": "user",
+                "user": "{{ params.approver_emails[0] if params.approver_emails | length \u003e 0 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[1] if params.approver_emails | length \u003e 1 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[2] if params.approver_emails | length \u003e 2 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[3] if params.approver_emails | length \u003e 3 }}"
+              },
+              {
+                "kind": "user",
+                "user": "{{ params.approver_emails[4] if params.approver_emails | length \u003e 4 }}"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "payload_schema": {
+      "properties": {
+        "approver_emails": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "resource_id": {
+          "type": "string"
+        },
+        "resource_type": {
+          "type": "string"
+        },
+        "tenant_name": {
+          "type": "string"
+        },
+        "tenant_rns": {
+          "type": "string"
+        },
+        "vlan": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tenant_rns"
+      ],
+      "type": "object"
+    },
+    "transitions": [
+      {
+        "condition": "approve",
+        "source": "tenant_admin_approval",
+        "target": "network_team_approval"
+      },
+      {
+        "condition": "reject",
+        "result": "Rejected",
+        "source": "tenant_admin_approval",
+        "target": "end"
+      },
+      {
+        "condition": "cancel",
+        "result": "Canceled",
+        "source": "tenant_admin_approval",
+        "target": "end"
+      },
+      {
+        "condition": "approve",
+        "result": "Successful",
+        "source": "network_team_approval",
+        "target": "end"
+      },
+      {
+        "condition": "reject",
+        "result": "Rejected",
+        "source": "network_team_approval",
+        "target": "end"
+      },
+      {
+        "condition": "cancel",
+        "result": "Canceled",
+        "source": "network_team_approval",
+        "target": "end"
+      },
+      {
+        "source": "start",
+        "target": "tenant_admin_approval"
+      }
+    ]
+  }
+}
+<-- 201
+{"kind":"ucp_poc_vm_creation_approval","number":33,"version_major":null,"published":false,"published_at":null,"published_by":null,"created_at":"2026-10-16T01:11:59.572590Z","created_by":"aripermana.putra@rakuten.com","updated_at":null,"updated_by":null,"update_number":0,"disabled":true,"definition":{"nodes":{"end":{"kind":"end","name":"Completed"},"network_team_approval":{"kind":"step","name":"Network team approval","step_kind":"network_team_approval","triggers":{"approve":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Approve"},"users":[{"kind":"team","team":"clsd-ucp-team","role":"admins"}],"notes":[],"adapter_only":false},"cancel":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Cancel","type":"object"},"users":[{"kind":"user","user":"{{ created_by }}"}],"notes":[],"adapter_only":false},"reject":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"kind":"team","team":"clsd-ucp-team","role":"admins"}],"notes":[],"adapter_only":false}},"skip_if":null,"skip_with":null,"skipped_label":null,"adapters":[]},"start":{"kind":"start","name":"Started"},"tenant_admin_approval":{"kind":"step","name":"Submitting tenant admin approval","step_kind":"tenant_admin_approval","triggers":{"approve":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Approve"},"users":[{"backup_spec":{"kind":"team","team":"clsd-ucp-team","role":"admins"},"kind":"user","user":"{{ params.approver_emails[0] if params.approver_emails | length > 0 }}"},{"kind":"user","user":"{{ params.approver_emails[1] if params.approver_emails | length > 1 }}"},{"kind":"user","user":"{{ params.approver_emails[2] if params.approver_emails | length > 2 }}"},{"kind":"user","user":"{{ params.approver_emails[3] if params.approver_emails | length > 3 }}"},{"kind":"user","user":"{{ params.approver_emails[4] if params.approver_emails | length > 4 }}"}],"notes":[],"adapter_only":false},"cancel":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Cancel","type":"object"},"users":[{"kind":"user","user":"{{ created_by }}"}],"notes":[],"adapter_only":false},"reject":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"backup_spec":{"kind":"team","team":"clsd-ucp-team","role":"admins"},"kind":"user","user":"{{ params.approver_emails[0] if params.approver_emails | length > 0 }}"},{"kind":"user","user":"{{ params.approver_emails[1] if params.approver_emails | length > 1 }}"},{"kind":"user","user":"{{ params.approver_emails[2] if params.approver_emails | length > 2 }}"},{"kind":"user","user":"{{ params.approver_emails[3] if params.approver_emails | length > 3 }}"},{"kind":"user","user":"{{ params.approver_emails[4] if params.approver_emails | length > 4 }}"}],"notes":[],"adapter_only":false}},"skip_if":null,"skip_with":null,"skipped_label":null,"adapters":[]}},"transitions":[{"source":"tenant_admin_approval","target":"network_team_approval","condition":"approve","result":null},{"source":"tenant_admin_approval","target":"end","condition":"reject","result":"Rejected"},{"source":"tenant_admin_approval","target":"end","condition":"cancel","result":"Canceled"},{"source":"network_team_approval","target":"end","condition":"approve","result":"Successful"},{"source":"network_team_approval","target":"end","condition":"reject","result":"Rejected"},{"source":"network_team_approval","target":"end","condition":"cancel","result":"Canceled"},{"source":"start","target":"tenant_admin_approval","condition":null,"result":null}],"payload_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"approver_emails":{"items":{"type":"string"},"type":"array"},"reason":{"type":"string"},"resource_id":{"type":"string"},"resource_type":{"type":"string"},"tenant_name":{"type":"string"},"tenant_rns":{"type":"string"},"vlan":{"type":"string"}},"required":["tenant_rns"],"type":"object"},"view":null,"fingerprint_fields":["resource_type","resource_id","tenant_name"],"viewers":[]},"builder_meta":null}
+
+definition draft number: 33
+
+--- Publish definition draft ---
+--> PUT /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/definitions/33/publish
+<-- 200
+{"kind":"ucp_poc_vm_creation_approval","number":33,"version_major":27,"published":true,"published_at":"2026-10-16T01:11:59.941746Z","published_by":"aripermana.putra@rakuten.com","created_at":"2026-10-16T01:11:59.572590Z","created_by":"aripermana.putra@rakuten.com","updated_at":"2026-10-16T01:11:59.941746Z","updated_by":"aripermana.putra@rakuten.com","update_number":0,"disabled":false,"definition":{"nodes":{"end":{"kind":"end","name":"Completed"},"network_team_approval":{"kind":"step","name":"Network team approval","step_kind":"network_team_approval","triggers":{"approve":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Approve"},"users":[{"kind":"team","team":"clsd-ucp-team","role":"admins"}],"notes":[],"adapter_only":false},"cancel":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Cancel","type":"object"},"users":[{"kind":"user","user":"{{ created_by }}"}],"notes":[],"adapter_only":false},"reject":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"kind":"team","team":"clsd-ucp-team","role":"admins"}],"notes":[],"adapter_only":false}},"skip_if":null,"skip_with":null,"skipped_label":null,"adapters":[]},"start":{"kind":"start","name":"Started"},"tenant_admin_approval":{"kind":"step","name":"Submitting tenant admin approval","step_kind":"tenant_admin_approval","triggers":{"approve":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Approve"},"users":[{"backup_spec":{"kind":"team","team":"clsd-ucp-team","role":"admins"},"kind":"user","user":"{{ params.approver_emails[0] if params.approver_emails | length > 0 }}"},{"kind":"user","user":"{{ params.approver_emails[1] if params.approver_emails | length > 1 }}"},{"kind":"user","user":"{{ params.approver_emails[2] if params.approver_emails | length > 2 }}"},{"kind":"user","user":"{{ params.approver_emails[3] if params.approver_emails | length > 3 }}"},{"kind":"user","user":"{{ params.approver_emails[4] if params.approver_emails | length > 4 }}"}],"notes":[],"adapter_only":false},"cancel":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Cancel","type":"object"},"users":[{"kind":"user","user":"{{ created_by }}"}],"notes":[],"adapter_only":false},"reject":{"payload":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"reason":{"type":"string"}},"title":"Reject","type":"object"},"users":[{"backup_spec":{"kind":"team","team":"clsd-ucp-team","role":"admins"},"kind":"user","user":"{{ params.approver_emails[0] if params.approver_emails | length > 0 }}"},{"kind":"user","user":"{{ params.approver_emails[1] if params.approver_emails | length > 1 }}"},{"kind":"user","user":"{{ params.approver_emails[2] if params.approver_emails | length > 2 }}"},{"kind":"user","user":"{{ params.approver_emails[3] if params.approver_emails | length > 3 }}"},{"kind":"user","user":"{{ params.approver_emails[4] if params.approver_emails | length > 4 }}"}],"notes":[],"adapter_only":false}},"skip_if":null,"skip_with":null,"skipped_label":null,"adapters":[]}},"transitions":[{"source":"tenant_admin_approval","target":"network_team_approval","condition":"approve","result":null},{"source":"tenant_admin_approval","target":"end","condition":"reject","result":"Rejected"},{"source":"tenant_admin_approval","target":"end","condition":"cancel","result":"Canceled"},{"source":"network_team_approval","target":"end","condition":"approve","result":"Successful"},{"source":"network_team_approval","target":"end","condition":"reject","result":"Rejected"},{"source":"network_team_approval","target":"end","condition":"cancel","result":"Canceled"},{"source":"start","target":"tenant_admin_approval","condition":null,"result":null}],"payload_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"approver_emails":{"items":{"type":"string"},"type":"array"},"reason":{"type":"string"},"resource_id":{"type":"string"},"resource_type":{"type":"string"},"tenant_name":{"type":"string"},"tenant_rns":{"type":"string"},"vlan":{"type":"string"}},"required":["tenant_rns"],"type":"object"},"view":null,"fingerprint_fields":["resource_type","resource_id","tenant_name"],"viewers":[]},"builder_meta":null}
+
+published version: 27
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap0ms-t1",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap0ms-t1",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 202
+{"workflow_id":"1xHWUK-gAnataBbqkm6skrI","job_id":"1xHWUK-gAnataBbqkm6skrI","status":"pending"}
+
+<-- 202
+{"workflow_id":"1xHWUK-pveRx2UbNjZfis3T","job_id":"1xHWUK-pveRx2UbNjZfis3T","status":"pending"}
+
+RESULT gap=0ms trial=1 accepted=2 of 2 [1xHWUK-pveRx2UbNjZfis3T 1xHWUK-gAnataBbqkm6skrI]
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap0ms-t2",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap0ms-t2",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 202
+{"workflow_id":"1xHWUL-uLyg3EdWMhEy8bCt","job_id":"1xHWUL-uLyg3EdWMhEy8bCt","status":"pending"}
+
+<-- 202
+{"workflow_id":"1xHWUL-Bcur2np4N0IUU05c","job_id":"1xHWUL-Bcur2np4N0IUU05c","status":"pending"}
+
+RESULT gap=0ms trial=2 accepted=2 of 2 [1xHWUL-Bcur2np4N0IUU05c 1xHWUL-uLyg3EdWMhEy8bCt]
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap0ms-t3",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap0ms-t3",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 202
+{"workflow_id":"1xHWUM-xZ9WLtrTFP4BWXSo","job_id":"1xHWUM-xZ9WLtrTFP4BWXSo","status":"pending"}
+
+<-- 202
+{"workflow_id":"1xHWUM-Rr4d3n6hJHY1u44Q","job_id":"1xHWUM-Rr4d3n6hJHY1u44Q","status":"pending"}
+
+RESULT gap=0ms trial=3 accepted=2 of 2 [1xHWUM-Rr4d3n6hJHY1u44Q 1xHWUM-xZ9WLtrTFP4BWXSo]
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap100ms-t1",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap100ms-t1",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 202
+{"workflow_id":"1xHWUN-4d4oqDm25Cuu8MlG","job_id":"1xHWUN-4d4oqDm25Cuu8MlG","status":"pending"}
+
+<-- 202
+{"workflow_id":"1xHWUN-GyWyURUpMlDfjKqz","job_id":"1xHWUN-GyWyURUpMlDfjKqz","status":"pending"}
+
+RESULT gap=100ms trial=1 accepted=2 of 2 [1xHWUN-4d4oqDm25Cuu8MlG 1xHWUN-GyWyURUpMlDfjKqz]
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap100ms-t2",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap100ms-t2",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 202
+{"workflow_id":"1xHWUO-n7sFX8w7dvj0xo9J","job_id":"1xHWUO-n7sFX8w7dvj0xo9J","status":"pending"}
+
+<-- 202
+{"workflow_id":"1xHWUP-ElxwYwYxz1eES22S","job_id":"1xHWUP-ElxwYwYxz1eES22S","status":"pending"}
+
+RESULT gap=100ms trial=2 accepted=2 of 2 [1xHWUO-n7sFX8w7dvj0xo9J 1xHWUP-ElxwYwYxz1eES22S]
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap100ms-t3",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap100ms-t3",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 202
+{"workflow_id":"1xHWUQ-BrJyqfiiVl8DpQ7b","job_id":"1xHWUQ-BrJyqfiiVl8DpQ7b","status":"pending"}
+
+<-- 202
+{"workflow_id":"1xHWUQ-FGKDVjpWZKf0E4jx","job_id":"1xHWUQ-FGKDVjpWZKf0E4jx","status":"pending"}
+
+RESULT gap=100ms trial=3 accepted=2 of 2 [1xHWUQ-BrJyqfiiVl8DpQ7b 1xHWUQ-FGKDVjpWZKf0E4jx]
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap300ms-t1",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap300ms-t1",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 202
+{"workflow_id":"1xHWUR-21GVMp6L1fozTXD9","job_id":"1xHWUR-21GVMp6L1fozTXD9","status":"pending"}
+
+<-- 202
+{"workflow_id":"1xHWUS-sXKV5gPvTjV565jT","job_id":"1xHWUS-sXKV5gPvTjV565jT","status":"pending"}
+
+RESULT gap=300ms trial=1 accepted=2 of 2 [1xHWUR-21GVMp6L1fozTXD9 1xHWUS-sXKV5gPvTjV565jT]
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap300ms-t2",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap300ms-t2",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 202
+{"workflow_id":"1xHWUT-ld4wNJ47beZworyT","job_id":"1xHWUT-ld4wNJ47beZworyT","status":"pending"}
+
+<-- 202
+{"workflow_id":"1xHWUT-uAcWFCyTl9jQaXvL","job_id":"1xHWUT-uAcWFCyTl9jQaXvL","status":"pending"}
+
+RESULT gap=300ms trial=2 accepted=2 of 2 [1xHWUT-ld4wNJ47beZworyT 1xHWUT-uAcWFCyTl9jQaXvL]
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap300ms-t3",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap300ms-t3",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 202
+{"workflow_id":"1xHWUU-PcxjQTgdZ9gH0CEk","job_id":"1xHWUU-PcxjQTgdZ9gH0CEk","status":"pending"}
+
+<-- 202
+{"workflow_id":"1xHWUV-A128DgzzJxZYMaYI","job_id":"1xHWUV-A128DgzzJxZYMaYI","status":"pending"}
+
+RESULT gap=300ms trial=3 accepted=2 of 2 [1xHWUU-PcxjQTgdZ9gH0CEk 1xHWUV-A128DgzzJxZYMaYI]
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap1000ms-t1",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap1000ms-t1",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 202
+{"workflow_id":"1xHWUW-5OFR12qrap4ClMb0","job_id":"1xHWUW-5OFR12qrap4ClMb0","status":"pending"}
+
+<-- 409
+{"errors":[{"code":"WF0011","message":"An active workflow with the same fingerprint exists.","detailedMessage":"The active workflow 1xHWUW-5OFR12qrap4ClMb0 has the same fingerprint.","metadata":{"workflow_id":"1xHWUW-5OFR12qrap4ClMb0","fingerprint":{"resource_type":"vm","resource_id":"fp3-vm-20261016-101157-gap1000ms-t1","tenant_name":"clsd-ucp"}}}]}
+
+RESULT gap=1000ms trial=1 accepted=1 of 2 [1xHWUW-5OFR12qrap4ClMb0 ]
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap1000ms-t2",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap1000ms-t2",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 202
+{"workflow_id":"1xHWUX-jAqv5QeijvYnaGLn","job_id":"1xHWUX-jAqv5QeijvYnaGLn","status":"pending"}
+
+<-- 409
+{"errors":[{"code":"WF0011","message":"An active workflow with the same fingerprint exists.","detailedMessage":"The active workflow 1xHWUX-jAqv5QeijvYnaGLn has the same fingerprint.","metadata":{"workflow_id":"1xHWUX-jAqv5QeijvYnaGLn","fingerprint":{"resource_type":"vm","resource_id":"fp3-vm-20261016-101157-gap1000ms-t2","tenant_name":"clsd-ucp"}}}]}
+
+RESULT gap=1000ms trial=2 accepted=1 of 2 [1xHWUX-jAqv5QeijvYnaGLn ]
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap1000ms-t3",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+--> POST /workflow-sapi/2/tenants/rns:roc:iam::clsd-ucp/kinds/ucp_poc_vm_creation_approval/versions/27/workflows
+{
+  "payload": {
+    "approver_emails": [
+      "aripermana.putra@rakuten.com"
+    ],
+    "reason": "poc fingerprint reason (not a fingerprint field)",
+    "resource_id": "fp3-vm-20261016-101157-gap1000ms-t3",
+    "resource_type": "vm",
+    "tenant_name": "clsd-ucp",
+    "tenant_rns": "rns:roc:iam::clsd-ucp"
+  }
+}
+<-- 202
+{"workflow_id":"1xHWUZ-AKPDB0gKQHWbkmTo","job_id":"1xHWUZ-AKPDB0gKQHWbkmTo","status":"pending"}
+
+<-- 409
+{"errors":[{"code":"WF0011","message":"An active workflow with the same fingerprint exists.","detailedMessage":"The active workflow 1xHWUZ-AKPDB0gKQHWbkmTo has the same fingerprint.","metadata":{"workflow_id":"1xHWUZ-AKPDB0gKQHWbkmTo","fingerprint":{"resource_type":"vm","resource_id":"fp3-vm-20261016-101157-gap1000ms-t3","tenant_name":"clsd-ucp"}}}]}
+
+RESULT gap=1000ms trial=3 accepted=1 of 2 [1xHWUZ-AKPDB0gKQHWbkmTo ]
+--> POST /workflow-sapi/2/jobs/1xHWUK-pveRx2UbNjZfis3T/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUK-pveRx2UbNjZfis3T","job_id":"1xHWUK-pveRx2UbNjZfis3T","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUK-gAnataBbqkm6skrI/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUK-gAnataBbqkm6skrI","job_id":"1xHWUK-gAnataBbqkm6skrI","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUL-Bcur2np4N0IUU05c/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUL-Bcur2np4N0IUU05c","job_id":"1xHWUL-Bcur2np4N0IUU05c","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUL-uLyg3EdWMhEy8bCt/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUL-uLyg3EdWMhEy8bCt","job_id":"1xHWUL-uLyg3EdWMhEy8bCt","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUM-Rr4d3n6hJHY1u44Q/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUM-Rr4d3n6hJHY1u44Q","job_id":"1xHWUM-Rr4d3n6hJHY1u44Q","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUM-xZ9WLtrTFP4BWXSo/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUM-xZ9WLtrTFP4BWXSo","job_id":"1xHWUM-xZ9WLtrTFP4BWXSo","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUN-4d4oqDm25Cuu8MlG/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUN-4d4oqDm25Cuu8MlG","job_id":"1xHWUN-4d4oqDm25Cuu8MlG","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUN-GyWyURUpMlDfjKqz/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUN-GyWyURUpMlDfjKqz","job_id":"1xHWUN-GyWyURUpMlDfjKqz","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUO-n7sFX8w7dvj0xo9J/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUO-n7sFX8w7dvj0xo9J","job_id":"1xHWUO-n7sFX8w7dvj0xo9J","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUP-ElxwYwYxz1eES22S/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUP-ElxwYwYxz1eES22S","job_id":"1xHWUP-ElxwYwYxz1eES22S","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUQ-BrJyqfiiVl8DpQ7b/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUQ-BrJyqfiiVl8DpQ7b","job_id":"1xHWUQ-BrJyqfiiVl8DpQ7b","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUQ-FGKDVjpWZKf0E4jx/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUQ-FGKDVjpWZKf0E4jx","job_id":"1xHWUQ-FGKDVjpWZKf0E4jx","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUR-21GVMp6L1fozTXD9/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUR-21GVMp6L1fozTXD9","job_id":"1xHWUR-21GVMp6L1fozTXD9","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUS-sXKV5gPvTjV565jT/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUS-sXKV5gPvTjV565jT","job_id":"1xHWUS-sXKV5gPvTjV565jT","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUT-ld4wNJ47beZworyT/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUT-ld4wNJ47beZworyT","job_id":"1xHWUT-ld4wNJ47beZworyT","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUT-uAcWFCyTl9jQaXvL/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUT-uAcWFCyTl9jQaXvL","job_id":"1xHWUT-uAcWFCyTl9jQaXvL","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUU-PcxjQTgdZ9gH0CEk/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUU-PcxjQTgdZ9gH0CEk","job_id":"1xHWUU-PcxjQTgdZ9gH0CEk","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUV-A128DgzzJxZYMaYI/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUV-A128DgzzJxZYMaYI","job_id":"1xHWUV-A128DgzzJxZYMaYI","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUW-5OFR12qrap4ClMb0/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUW-5OFR12qrap4ClMb0","job_id":"1xHWUW-5OFR12qrap4ClMb0","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUX-jAqv5QeijvYnaGLn/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUX-jAqv5QeijvYnaGLn","job_id":"1xHWUX-jAqv5QeijvYnaGLn","status":"success"}
+
+--> POST /workflow-sapi/2/jobs/1xHWUZ-AKPDB0gKQHWbkmTo/cancel
+{}
+<-- 200
+{"workflow_id":"1xHWUZ-AKPDB0gKQHWbkmTo","job_id":"1xHWUZ-AKPDB0gKQHWbkmTo","status":"success"}
+
+
+created workflows: [1xHWUK-pveRx2UbNjZfis3T 1xHWUK-gAnataBbqkm6skrI 1xHWUL-Bcur2np4N0IUU05c 1xHWUL-uLyg3EdWMhEy8bCt 1xHWUM-Rr4d3n6hJHY1u44Q 1xHWUM-xZ9WLtrTFP4BWXSo 1xHWUN-4d4oqDm25Cuu8MlG 1xHWUN-GyWyURUpMlDfjKqz 1xHWUO-n7sFX8w7dvj0xo9J 1xHWUP-ElxwYwYxz1eES22S 1xHWUQ-BrJyqfiiVl8DpQ7b 1xHWUQ-FGKDVjpWZKf0E4jx 1xHWUR-21GVMp6L1fozTXD9 1xHWUS-sXKV5gPvTjV565jT 1xHWUT-ld4wNJ47beZworyT 1xHWUT-uAcWFCyTl9jQaXvL 1xHWUU-PcxjQTgdZ9gH0CEk 1xHWUV-A128DgzzJxZYMaYI 1xHWUW-5OFR12qrap4ClMb0 1xHWUX-jAqv5QeijvYnaGLn 1xHWUZ-AKPDB0gKQHWbkmTo]

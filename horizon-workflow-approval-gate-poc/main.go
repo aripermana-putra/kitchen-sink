@@ -28,6 +28,26 @@
 //     (UCP_SERVICE_RNS, UCP_RESOURCE_RNS, UCP_ROLE) instead of the tenant kind.
 //   - user-groups: layer 1 uses one user group per email in APPROVER_EMAILS
 //     (5 slots; "none" supplies an empty list), backed up by TEAM_NAME.
+//   - custom-kind: layer 1 uses a custom HTTP user group kind that reads the
+//     members of TENANT_NAME from Core Data with a UCP service client and keeps
+//     the holders of CUSTOM_KIND_ROLE on rns:roc:ucp. Needs CLIENT_SECRET (and
+//     optionally CLIENT_ID, KEYCLOAK_URL, CORE_DATA_BASE_URL, CUSTOM_KIND_ID).
+//     The secret, config and kind stay in the Workflow tenant until a run with
+//     CLEANUP=1 removes them. The script prints the resolved approvers and
+//     cancels the workflow instead of approving it.
+//   - fingerprint: the definition sets fingerprint_fields (MODE=production
+//     only). The run creates a workflow, then a duplicate, a different one, one
+//     missing a field, and a repeat after cancelling the first, cancelling all
+//     it created at the end.
+//   - fingerprint-race: the definition sets fingerprint_fields (MODE=production
+//     only). The run creates pairs of one payload with the second delayed by
+//     0, 100, 300 and 1000 ms and reports how many of each pair were accepted.
+//   - fingerprint-types: like fingerprint, with extra fingerprint fields holding
+//     a number, boolean, object, array, long string and a string with HTML
+//     characters (MODE=production only). Creates one workflow and repeats it.
+//   - idempotency: the definition sets fingerprint_fields (MODE=production
+//     only). The run replays one X-Request-ID across creations and probes
+//     POST /jobs:check-duplicate at several delays after a creation.
 //   - email: an email callback node notifies APPROVER_EMAILS before layer 1.
 //   - no-successful: the approve path ends in Completed, so no path sets the
 //     Successful outcome.
@@ -52,6 +72,8 @@
 //	TEAM_NAME (default: clsd-ucp-team)
 //	VLAN (value supplied at creation; empty means not supplied)
 //	RESOURCE_ID (default: poc-vm-001; appears in the custom email subject)
+//	TENANT_NAME (default: clsd-ucp; the tenant whose members the custom kind reads)
+//	CLEANUP=1 (only removes the custom kind, secret and config, then exits)
 //	APPROVER_EMAILS (comma separated; default: the operator)
 //	UCP_SERVICE_RNS (default: rns:roc:ucp), UCP_ROLE (default: test-admin),
 //	UCP_RESOURCE_RNS (default: empty)
@@ -113,11 +135,18 @@ func main() {
 
 	client := newWorkflowClient(workflowBaseURL, token)
 
+	if os.Getenv("CLEANUP") == "1" {
+		fmt.Println("\n--- Remove custom user group kind, tenant secret and tenant config ---")
+		client.teardownCustomKind(loadCustomKindConfig(tenantRNS))
+		return
+	}
+
 	fmt.Println("\n--- Register Workflow kind (idempotent — ok if it already exists) ---")
 	if err := client.createWorkflowKind(tenantRNS, kindID, "UCP PoC VM Creation Approval", "PoC for MCUCP-304: two-layer approval gate"); err != nil {
 		fatalf("create workflow kind: %v", err)
 	}
 
+	var customCfg customKindConfig
 	layer1Groups := []any{tenantAdminGroup()}
 	switch {
 	case variants["service-role"]:
@@ -128,6 +157,16 @@ func main() {
 		)}
 	case variants["user-groups"]:
 		layer1Groups = emailUserGroups(teamGroup(teamName))
+	case variants["custom-kind"]:
+		if mode != "production" {
+			fatalf("VARIANT custom-kind needs MODE=production")
+		}
+		customCfg = loadCustomKindConfig(tenantRNS)
+		fmt.Println("\n--- Store tenant secret/config and register the custom user group kind ---")
+		if err := client.setupCustomKind(customCfg); err != nil {
+			fatalf("%v", err)
+		}
+		layer1Groups = []any{customCfg.group()}
 	}
 
 	fmt.Println("\n--- Create definition draft ---")
@@ -137,6 +176,8 @@ func main() {
 		conditionalNetwork: variants["vlan"],
 		emailNotify:        variants["email"],
 		noSuccessful:       variants["no-successful"],
+		fingerprint:        variants["fingerprint"] || variants["fingerprint-race"] || variants["idempotency"] || variants["fingerprint-types"],
+		fingerprintTypes:   variants["fingerprint-types"],
 	})
 	draftNumber, err := client.createDefinitionDraft(tenantRNS, kindID, definition)
 	if err != nil {
@@ -149,6 +190,7 @@ func main() {
 		"resource_type":   "vm",
 		"resource_id":     envOr("RESOURCE_ID", "poc-vm-001"),
 		"approver_emails": approverEmails(envOr("APPROVER_EMAILS", email)),
+		"tenant_name":     envOr("TENANT_NAME", "clsd-ucp"),
 	}
 	if v := os.Getenv("VLAN"); v != "" {
 		params["vlan"] = v
@@ -172,6 +214,30 @@ func main() {
 			fatalf("publish definition draft: %v", err)
 		}
 		fmt.Printf("published version: %d\n", version)
+
+		if variants["fingerprint-types"] {
+			runFingerprintTypes(client, tenantRNS, kindID, version, params)
+			return
+		}
+		if variants["idempotency"] {
+			runIdempotencyCases(client, tenantRNS, kindID, version, params)
+			return
+		}
+		if variants["fingerprint-race"] {
+			runFingerprintRaceWindow(client, tenantRNS, kindID, version, params)
+			return
+		}
+		if variants["fingerprint"] {
+			publishNext := func() (int, error) {
+				n, err := client.createDefinitionDraft(tenantRNS, kindID, definition)
+				if err != nil {
+					return 0, err
+				}
+				return client.publishDefinitionDraft(tenantRNS, kindID, n)
+			}
+			runFingerprintCases(client, tenantRNS, kindID, version, params, publishNext)
+			return
+		}
 
 		fmt.Println("\n--- Create production workflow ---")
 		workflowID, err = client.createProductionWorkflow(tenantRNS, kindID, version, params)
@@ -240,6 +306,16 @@ func main() {
 	wf := settled(status)
 	fmt.Printf("execution_status: %s\n", wf.ExecutionStatus)
 
+	if variants["custom-kind"] {
+		wf = settledWithStep(status)
+		printResolvedApprovers(wf)
+		if err := act("cancel", nil); err != nil {
+			fmt.Printf("warning: could not cancel the workflow: %v\n", err)
+		}
+		fmt.Println("\nWorkflow cancelled. Run with CLEANUP=1 to remove the custom kind, secret and config.")
+		return
+	}
+
 	fmt.Printf("\n--- Trigger layer 1: %s ---\n", layer1Action)
 	if err := act(layer1Action, nil); err != nil {
 		fatalf("trigger layer 1 %s: %v", layer1Action, err)
@@ -274,6 +350,17 @@ func main() {
 func settled(status func() testWorkflowDetail) testWorkflowDetail {
 	wf := status()
 	for i := 0; i < settleAttempts && wf.ExecutionStatus == "processing"; i++ {
+		time.Sleep(settleInterval)
+		wf = status()
+	}
+	return wf
+}
+
+// settledWithStep polls until the workflow has a current step: the first read
+// after creation can precede the step.
+func settledWithStep(status func() testWorkflowDetail) testWorkflowDetail {
+	wf := status()
+	for i := 0; i < settleAttempts && len(wf.Steps) == 0; i++ {
 		time.Sleep(settleInterval)
 		wf = status()
 	}
